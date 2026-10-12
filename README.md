@@ -6,6 +6,7 @@ A mobile-friendly QR-first serial scanner with printed-text OCR as a fallback.
 
 1. Tap **Start live scan** and allow camera access. The rear camera is preferred on phones.
 2. Point at one QR code and hold it steady. The frame is searched for supported QR data first; printed-text OCR is used if no supported QR is found.
+   In Scanner v2, put one whole QR inside the yellow guide. The centre is scanned from native camera pixels first, then the rest of the frame. Continuous focus is requested where supported. Zoom and light controls appear only when the camera exposes them. Avoid glare; increasing zoom cannot recover an out-of-focus image.
 3. When a QR serial is decoded, the frame freezes immediately. OCR results require two matching readings. You can also tap **Scan label** to capture the current frame manually.
 4. Tap a yellow highlight or a serial chip below the preview. Review or correct the text, then use **Copy text** or **Add to list**. Copying does not save it. Tap **Cancel** to select something else, or **Continue scanning** for a fresh frame. Already confirmed codes are skipped.
 5. Use **Copy** for one code or **Copy all** for a newline-separated list.
@@ -26,11 +27,13 @@ Scans are saved in this browser on this device. Images and live camera frames ar
 
 ## Publish with GitHub Pages
 
-Upload `index.html`, `scanner-qr.js`, `qr-core.js`, and `.nojekyll` to the root of a GitHub repository. Then open **Settings → Pages**, choose **Deploy from a branch**, and select **main** and **/(root)**. Save and wait for GitHub to report the published URL.
+Upload `index.html`, `scanner-v2.js`, `qr-core-v2.js`, `jsqr-1.4.0.js`, `jsqr-LICENSE.txt`, and `.nojekyll` to the root of a GitHub repository. Then open **Settings → Pages**, choose **Deploy from a branch**, and select **main** and **/(root)**. Save and wait for GitHub to report the published URL.
 
 The resulting website is publicly accessible. The source package contains no uploaded photos, saved scan results, or account credentials.
 
 ## Edit
 
-The HTML and styles are in `index.html`; camera, OCR, and list behavior are in `scanner-qr.js`; QR payload parsing and region search are in `qr-core.js`. No build step is required. [jsQR](https://github.com/cozmo/jsQR) 1.4.0 and Tesseract.js 5.1.1 are loaded from jsDelivr. Push changes to the publishing branch to update the website. Earlier script assets are retained so cached versions of the old page still work.
+The HTML and styles are in `index.html`; camera, OCR, and list behavior are in `scanner-v2.js`; QR payload parsing and region search are in `qr-core-v2.js`. No build step is required. [jsQR](https://github.com/cozmo/jsQR) 1.4.0 is bundled unmodified with its Apache 2.0 license; Tesseract.js 5.1.1 loads asynchronously from jsDelivr so it cannot delay the QR engine. Push changes to the publishing branch to update the website. Earlier script assets are retained so cached versions of the old page still work.
+
+Live status distinguishes a QR that is unreadable, a decoded but unsupported format, an already-added serial, and a missing decoder. Unknown QR links are never opened or guessed as serials. The inferred TAA8 mapping has not changed.
 
