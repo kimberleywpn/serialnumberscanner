@@ -30,7 +30,7 @@ function renderList() {
   $('#count').textContent = items.length;
   $('#emptyList').style.display = items.length ? 'none' : 'block';
   $('#copyAll').disabled = $('#clearAll').disabled = !items.length || LabelLensAccount.saving();
-  $('#results').innerHTML = items.map((item, i) => `<article class="result-row"><span class="number">${i + 1}</span><div><div class="result-code">${escapeHtml(item.code)}</div><div class="result-time">${escapeHtml(item.time)}${item.inferred ? ' · QR estimate' : ''}${item.edited ? ' · corrected' : ''}</div></div><div class="draft-row-actions"><button class="copy-one" data-i="${i}">Copy</button><button class="remove-one" data-remove="${i}" aria-label="Remove ${escapeHtml(item.code)}" ${LabelLensAccount.saving() ? 'disabled' : ''}>×</button></div></article>`).join('');
+  $('#results').innerHTML = items.map((item, i) => `<article class="result-row"><span class="number">${i + 1}</span><div><div class="result-code">${escapeHtml(item.code)}</div><div class="result-time">${escapeHtml(item.time)}${item.inferred ? ' · QR estimate' : ''}${item.edited ? ' · corrected' : ''}</div></div><div class="draft-row-actions"><button class="copy-one" data-edit="${i}" ${LabelLensAccount.saving() ? 'disabled' : ''}>Edit</button><button class="copy-one" data-i="${i}">Copy</button><button class="remove-one" data-remove="${i}" aria-label="Remove ${escapeHtml(item.code)}" ${LabelLensAccount.saving() ? 'disabled' : ''}>×</button></div></article>`).join('');
 }
 function save() {
   renderList();
@@ -60,7 +60,6 @@ function syncControls() {
   $('#liveButton').textContent = starting ? 'Cancel camera' : stream ? 'Stop camera' : 'Start live scan';
   $('#liveButton').disabled = !canScan && !stream && !starting || busy && !stream && !starting;
   $('#scan').hidden = Boolean(stream || starting || pending);
-  $('#scanHelp').hidden = Boolean(stream || starting || pending);
   $('#scan').disabled = !canScan || !source || busy;
   $('#left').disabled = $('#right').disabled = !source || busy || Boolean(stream) || starting;
   $('#file').disabled = $('#upload').disabled = !canScan || busy && !stream;
@@ -77,7 +76,7 @@ function syncControls() {
 }
 function validateConfirmation() {
   const code = normalizeCode($('#detectedCode').value);
-  const duplicate = alreadyAdded(code);
+  const duplicate = items.some((item, index) => index !== pending?.editIndex && normalizeCode(item.code) === code);
   const valid = SERIAL_FORMAT.test(code);
   $('#addCode').disabled = !LabelLensAccount.canScan() || !valid || duplicate || items.length >= 500;
   $('#copyDetected').disabled = !code.length;
@@ -87,6 +86,7 @@ function validateConfirmation() {
 function showConfirmation(code, origin) {
   const reading = detected.find(item => item.code === code);
   pending = {code, origin, method:reading?.method || 'ocr', inferred:Boolean(reading?.inferred)};
+  $('#confirmTitle').textContent = 'Confirm serial';
   $('#readingNote').textContent = pending.inferred
     ? 'QR-derived estimate for the sample TAA8 series. Check the printed serial. This is not a SIRIM authenticity check.'
     : pending.method === 'qr' ? 'Read directly from QR data. Check before adding.' : 'Read from printed text. Check before adding.';
@@ -96,6 +96,17 @@ function showConfirmation(code, origin) {
   syncControls();
   if (stream) liveStatus('Check the text, then copy it or add it to your list.');
   renderDetections();
+  $('#confirmation').scrollIntoView({behavior: 'smooth', block: 'nearest'});
+}
+function editDraft(index) {
+  const item = items[index];
+  if (!item || LabelLensAccount.saving()) return;
+  pending = {...item, code:item.code, editIndex:index};
+  $('#confirmTitle').textContent = 'Edit serial';
+  $('#readingNote').textContent = 'Correct the scanned serial, then save the change to this draft.';
+  $('#detectedCode').value = item.code;
+  $('#last').style.display = 'none';
+  validateConfirmation(); syncControls(); renderDetections();
   $('#confirmation').scrollIntoView({behavior: 'smooth', block: 'nearest'});
 }
 function clearConfirmation() {
@@ -110,7 +121,14 @@ $('#confirmForm').addEventListener('submit', event => {
   event.preventDefault();
   if (!pending) return;
   const code = validateConfirmation();
-  if (!LabelLensAccount.canScan() || !SERIAL_FORMAT.test(code) || alreadyAdded(code) || items.length >= 500) return;
+  if (!LabelLensAccount.canScan() || !SERIAL_FORMAT.test(code) || items.some((item, index) => index !== pending?.editIndex && normalizeCode(item.code) === code) || items.length >= 500) return;
+  if (Number.isInteger(pending.editIndex)) {
+    const item = items[pending.editIndex];
+    if (!item) return;
+    items[pending.editIndex] = {...item, code, edited:code !== (item.originalCode || item.code)};
+    save(); clearConfirmation(); toast('Serial updated');
+    return;
+  }
   lastConfirmedRead = pending.code;
   confirmedReads.add(pending.code);
   detected = detected.filter(reading => reading.code !== pending.code);
@@ -147,6 +165,8 @@ async function copyText(text, message) {
   }
 }
 $('#results').onclick = event => {
+  const edit = event.target.closest('[data-edit]');
+  if (edit) editDraft(Number(edit.dataset.edit));
   const button = event.target.closest('[data-i]');
   if (button) copyText(items[Number(button.dataset.i)].code, 'Code copied');
   const remove = event.target.closest('[data-remove]');
