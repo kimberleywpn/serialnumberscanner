@@ -1,39 +1,133 @@
-# Label Lens
+# Label Lens — logged-in serial scanner
 
-A mobile-friendly QR-first serial scanner with printed-text OCR as a fallback.
+The mobile frontend is hosted at
+https://kimberleywpn.github.io/serialnumberscanner/. Its authenticated API is
+running at https://m9kw6gfq-8088.asse.devtunnels.ms. This matches the battery-app
+deployment pattern: GitHub Pages serves only public browser files, while shared
+login, SQLite and the private product catalogue stay on the PC. Real account
+sign-in and physical phone-camera testing remain pending. See RUNNING.md for the
+current local setup; the PC, scanner process and tunnel must stay running.
 
-## Use
+## Staff workflow
 
-1. Tap **Start live scan** and allow camera access. The rear camera is preferred on phones.
-2. Point at one QR code and hold it steady. The frame is searched for supported QR data first; printed-text OCR is used if no supported QR is found.
-   In Scanner v2, put one whole QR inside the yellow guide. The centre is scanned from native camera pixels first, then the rest of the frame. Continuous focus is requested where supported. Zoom and light controls appear only when the camera exposes them. Avoid glare; increasing zoom cannot recover an out-of-focus image.
-3. When a QR serial is decoded, the frame freezes immediately. OCR results require two matching readings. You can also tap **Scan label** to capture the current frame manually.
-4. Tap a yellow highlight or a serial chip below the preview. Review or correct the text, then use **Copy text** or **Add to list**. Copying does not save it. Tap **Cancel** to select something else, or **Continue scanning** for a fresh frame. Already confirmed codes are skipped.
-5. Use **Copy** for one code or **Copy all** for a newline-separated list.
+1. Sign in with the existing shared battery / sales dashboard username and password.
+2. Pick Kroon-Oil or WIN and a product variant. Oil type, SAE grade and API/ACEA/JASO/ILSAC ratings come from the private catalogue.
+3. Pick any of 1L, 3.5L, 4L, 5L or 18L for every product. Type dealer name and batch.
+4. Scan QR / printed text, or enter a serial manually. Review and correct it, then add it to the draft.
+5. Submit the confirmed draft. Each submission records the product snapshot, litres, dealer, batch, serials, account and UTC timestamp.
+6. Users see their own submitted history. Admins can switch to the master view and search everyone's submissions. Both views have copyable serial lists and pagination.
 
-**Stop camera** releases the camera. Switching away from the page also stops it. You can restart scanning when you return.
+Details are locked once the first draft serial is added, preventing a batch from
+accidentally changing product halfway through. Submit or clear the draft to change
+them. Dealer and batch stay selected after a successful submission for another list.
+Drafts stay in memory, not shared localStorage. Submit before leaving/signing out.
+Saved history cannot be deleted through the web interface. Clearing a draft never
+deletes submitted records.
 
-For existing images, use **Take photo** or **Upload** and tap **Scan labels**. Multiple smaller QR-focused regions are searched to avoid confusing neighboring labels. Detected serials can be selected individually. If no supported QR is found, OCR is tried. You can enable **Use precision crop for difficult photos** to bypass QR scanning and read a cropped text line. Results require confirmation before being added. Some small, blurred, shadowed, or cut-off labels may need a closer photo.
+## Authentication and storage
 
-## QR mapping and safety
+- Central account source: PostgreSQL `public.sales_report_login`, SELECT-only connection, existing bcrypt hashes. The scanner never creates/changes central accounts, shares another app's session token, or copies passwords/password hashes into SQLite.
+- Scanner-specific data: `data/label-lens.sqlite` in WAL mode. Not the battery or dashboard SQLite file.
+- Default admin roles: `admin`, `logistic`, consistent with the existing shared-login integration. `manager` and `sales` submit and see their own history. `account`, `readonly`, `warehouse`, `warehouse_preview`, `warehouse preview` are read-only and cannot submit or open master history. Unknown roles are refused. Configure `LABEL_LENS_ADMIN_ROLES` only when the account owner approves a role policy change.
+- Separate opaque 12-hour bearer session for the GitHub frontend, stored only in that site's browser storage. The API stores only token hashes. CSRF tokens, an exact GitHub Pages origin allowlist and strict CORS protect writes. Same-origin direct-server access retains the secure cookie fallback.
+- Central password/role changes and removed accounts invalidate scanner access on the next API request. If PostgreSQL is unavailable, requests fail closed; no offline-login fallback.
+- Login throttling persists across service restarts. Configure the HTTPS proxy to supply the actual client address; forwarded headers are trusted only from loopback.
+- Serials are unique across all submissions. A duplicate aborts the entire new submission without saving part of it. Conflicts do not disclose another user's details. Remove already-submitted serials from the draft and retry.
+- Retry IDs make network retries idempotent. Submission owner and product metadata are assigned by the server, not accepted from arbitrary client fields.
+- Camera images, photos and raw QR URLs are not uploaded. Tesseract downloads its OCR runtime/language files from its normal CDN endpoints; processing occurs on the device. Internet access is needed for OCR initialization.
 
-Plain `TAA` serials in QR data are read directly. For SIRIM links matching the sample's `https://sqasiapps.sirim.my/index` format (`v=1.1`, `c=I1NR`, `o=A`), the recognized 22-byte payload has a big-endian counter at bytes 8–11. Four sample pairs matched `TAA8` plus the six-digit value of `counter + 1`. This mapping is inferred for the sample label series, not an officially confirmed universal SIRIM format. QR-derived estimates are visibly labeled and must be checked against the printed serial before saving.
+## QR limitations
 
-The website never opens QR URLs automatically, sends label tokens to SIRIM, or claims to verify authenticity. Unknown QR formats fall back to OCR. No serial is saved without the user tapping **Add to list**.
+TAA/TBA/THA are supported when read as printed text or directly from plain QR data;
+manual confirmation accepts three letters followed by 7–10 digits.
+Opaque SIRIM links still use the earlier **sample-only TAA8 estimate**. Product
+selection never changes a QR-derived prefix. Check the complete printed serial,
+including its prefix, before confirming. QR estimates are flagged in stored history
+and are not SIRIM authenticity checks. Physical phone-camera accuracy still needs
+testing on the staff phone after HTTPS deployment.
 
-This is an iPhone-inspired web interaction, not Apple's native Live Text engine. It runs on compatible mobile browsers using Tesseract.js OCR.
+## Private catalogue
 
-Scans are saved in this browser on this device. Images and live camera frames are processed in the browser. The OCR library and language data require an internet connection to load. Live OCR checks one frame at a time; detection speed depends on the device, focus, lighting, and how steadily the label is held. Automatic live detection is tailored to the sample's `TAA` serial format.
+`catalogue.json` contains 47 source rows imported read-only from the supplied SKU
+workbook (35 KROON-OIL, 12 WIN). IDs and source sheet/row references are retained.
+Source wording/ratings have not been silently corrected. Keep IDs stable when
+updating this file. Restarting seeds the current product master; historical
+submissions retain their original metadata snapshot.
 
-## Publish with GitHub Pages
+The catalogue is outside `public/` and served only through the authenticated API.
+It is intentionally gitignored. Deliver it privately to the server operator.
+Never commit `.env`, database files, backups, catalogue or the original workbook
+to a public GitHub repository.
 
-Upload `index.html`, `scanner-v2.js`, `qr-core-v2.js`, `jsqr-1.4.0.js`, `jsqr-LICENSE.txt`, and `.nojekyll` to the root of a GitHub repository. Then open **Settings → Pages**, choose **Deploy from a branch**, and select **main** and **/(root)**. Save and wait for GitHub to report the published URL.
+## Deployment alongside the battery backend
 
-The resulting website is publicly accessible. The source package contains no uploaded photos, saved scan results, or account credentials.
+The current battery frontend embeds an HTTPS dev-tunnel endpoint on port **8080**.
+Leave that application, its port and its tunnel alone. The scanner is a separate
+service on loopback **8088**, with its own HTTPS forwarded address. No changes to
+the battery or sales dashboard code/database are required.
 
-## Edit
+1. Keep this folder on the same PC/server that can reach the shared login database.
+2. Create a separate virtual environment and install the pinned dependencies:
 
-The HTML and styles are in `index.html`; camera, OCR, and list behavior are in `scanner-v2.js`; QR payload parsing and region search are in `qr-core-v2.js`. No build step is required. [jsQR](https://github.com/cozmo/jsQR) 1.4.0 is bundled unmodified with its Apache 2.0 license; Tesseract.js 5.1.1 loads asynchronously from jsDelivr so it cannot delay the QR engine. Push changes to the publishing branch to update the website. Earlier script assets are retained so cached versions of the old page still work.
+   ```powershell
+   python -m venv .venv
+   .\.venv\Scripts\python.exe -m pip install -r requirements.txt
+   ```
 
-Live status distinguishes a QR that is unreadable, a decoded but unsupported format, an already-added serial, and a missing decoder. Unknown QR links are never opened or guessed as serials. The inferred TAA8 mapping has not changed.
+3. Forward `127.0.0.1:8088` using the existing deployment system (for example, the
+   VS Code Ports/Dev Tunnels setup) or a dedicated HTTPS reverse proxy. Obtain the
+   actual scanner HTTPS origin first. Do not guess an address or expose a test-only
+   QA service. A normal proxy should preserve the original Host header. For a
+   Microsoft dev tunnel rewriting Host/Origin to localhost, explicitly set
+   `LABEL_LENS_TUNNEL_PORT=8088`. This permits only the local forwarded hostname
+   and exact local origins, with same-origin fetch metadata plus the scanner's
+   custom origin header. CORS is restricted to the configured GitHub Pages origin,
+   and session writes still require CSRF.
+   This compatibility setting is refused for non-devtunnels.ms public origins.
+4. Create private `.env` from `.env.example`. Set `LABEL_LENS_ORIGIN` to that exact
+   HTTPS API origin and `LABEL_LENS_FRONTEND_ORIGIN` to
+   `https://kimberleywpn.github.io`, both without a trailing slash or path. Set
+   `SHARED_AUTH_ENV_FILE` to the existing private auth configuration file. Do not
+   paste credentials into HTML, browser settings, URL query parameters, or GitHub
+   variables.
+5. Run `./Start-Server.ps1`. Keep it running. For an unattended server, register
+   this command through the server operator's existing service/scheduler mechanism.
+   Do not stop or replace the existing apps.
+6. Publish only the files inside `public/` to GitHub Pages, and open the GitHub Pages
+   URL on staff phones. `account.js` points API requests at the HTTPS tunnel and
+   sends the scanner's separate bearer token. Never publish `.env`, `catalogue.json`,
+   SQLite files, backups or the source workbook.
+7. Verify real login, product selection, physical camera, confirmation, submission,
+   personal history, master history, and logout on a phone before release.
+
+An operator using Caddy can add a **new** dedicated site, leaving existing site
+blocks unchanged:
+
+```caddyfile
+scanner.example.com {
+    reverse_proxy 127.0.0.1:8088
+}
+```
+
+Replace the example with an owned, configured domain; do not use it literally.
+See [Caddy reverse proxy documentation](https://caddyserver.com/docs/caddyfile/directives/reverse_proxy).
+No wildcard CORS is enabled; only the configured GitHub Pages origin is accepted.
+
+## Backups and tests
+
+Run `./.venv/Scripts/python.exe -m server.backup` for a consistent, verified private
+SQLite snapshot (including WAL data). Store backups outside the public directory,
+protect them like the live database, and copy them to private off-server storage.
+Before a restore, stop only this scanner service, retain the current database and
+its WAL/SHM files recoverably, and have the operator restore/test the private
+snapshot. Restoring may restore old scanner sessions; clear the `sessions` table
+as part of the controlled restore before starting service.
+
+```powershell
+.\.venv\Scripts\python.exe -m pip install -r requirements-test.txt
+.\.venv\Scripts\python.exe -m pytest tests -q
+```
+
+Test authentication is injected only by test fixtures. The production factory has
+no demo accounts or environment variable that bypasses shared authentication.
 
