@@ -56,14 +56,14 @@ function extractCode(text, strict = false) {
 function alreadyAdded(code) { return items.some(item => normalizeCode(item.code) === code); }
 
 function syncControls() {
-  const ready = LabelLensAccount.ready();
+  const canScan = LabelLensAccount.canScan();
   $('#liveButton').textContent = starting ? 'Cancel camera' : stream ? 'Stop camera' : 'Start live scan';
-  $('#liveButton').disabled = !ready && !stream && !starting || busy && !stream && !starting;
+  $('#liveButton').disabled = !canScan && !stream && !starting || busy && !stream && !starting;
   $('#scan').hidden = Boolean(stream || starting || pending);
   $('#scanHelp').hidden = Boolean(stream || starting || pending);
-  $('#scan').disabled = !ready || !source || busy;
+  $('#scan').disabled = !canScan || !source || busy;
   $('#left').disabled = $('#right').disabled = !source || busy || Boolean(stream) || starting;
-  $('#file').disabled = $('#upload').disabled = !ready || busy && !stream;
+  $('#file').disabled = $('#upload').disabled = !canScan || busy && !stream;
   $('#confirmation').hidden = !pending;
   $('#box').hidden = Boolean(stream) || !$('#precisionMode').checked || frozen;
   $('#precisionLabel').hidden = !source || Boolean(stream) || starting;
@@ -79,7 +79,7 @@ function validateConfirmation() {
   const code = normalizeCode($('#detectedCode').value);
   const duplicate = alreadyAdded(code);
   const valid = SERIAL_FORMAT.test(code);
-  $('#addCode').disabled = !LabelLensAccount.ready() || !valid || duplicate || items.length >= 500;
+  $('#addCode').disabled = !LabelLensAccount.canScan() || !valid || duplicate || items.length >= 500;
   $('#copyDetected').disabled = !code.length;
   $('#confirmError').textContent = duplicate ? 'This code is already in your draft.' : !valid ? 'Use 3 letters followed by 6–10 digits.' : items.length >= 500 ? 'Submit this draft before adding more serials.' : '';
   return code;
@@ -110,7 +110,7 @@ $('#confirmForm').addEventListener('submit', event => {
   event.preventDefault();
   if (!pending) return;
   const code = validateConfirmation();
-  if (!LabelLensAccount.ready() || !SERIAL_FORMAT.test(code) || alreadyAdded(code) || items.length >= 500) return;
+  if (!LabelLensAccount.canScan() || !SERIAL_FORMAT.test(code) || alreadyAdded(code) || items.length >= 500) return;
   lastConfirmedRead = pending.code;
   confirmedReads.add(pending.code);
   detected = detected.filter(reading => reading.code !== pending.code);
@@ -301,7 +301,7 @@ function stopCamera(message = 'Camera stopped.', keepPending = true) {
   renderPhoto(); liveStatus(message); syncControls();
 }
 async function startCamera() {
-  if (!LabelLensAccount.ready()) return;
+  if (!LabelLensAccount.canScan()) return;
   if (!navigator.mediaDevices?.getUserMedia) {
     liveStatus('Live camera is unavailable here. Open this HTTPS link in Safari or Chrome, or upload a photo.'); return;
   }
@@ -341,7 +341,7 @@ async function startCamera() {
 }
 $('#liveButton').onclick = () => { if (stream || starting) stopCamera(); else startCamera(); };
 function loadPhoto(event) {
-  if (!LabelLensAccount.ready()) { event.target.value = ''; return; }
+  if (!LabelLensAccount.canScan()) { event.target.value = ''; return; }
   const file = event.target.files[0]; if (!file) return;
   stopCamera('Photo mode. Tap Scan labels to read QR codes first.', false);
   confirmedReads.clear();
@@ -445,7 +445,7 @@ async function readQR(frame, exhaustive, ticket) {
   });
 }
 async function scanLive(capture = false) {
-  if (!LabelLensAccount.ready()) { if (stream) stopCamera('Complete the product and batch fields to continue.', false); return; }
+  if (!LabelLensAccount.canScan()) { if (stream) stopCamera('Scanning is unavailable for this account.', false); return; }
   if (!stream || pending || starting || frozen) return;
   if (busy || drag || resizing || document.hidden) { scheduleLive(); return; }
   const ticket = session, cropTicket = cropVersion;
@@ -527,7 +527,7 @@ window.addEventListener('pagehide', () => {
   workerPromise?.then(worker => worker.terminate()).catch(() => {}); workerPromise = null;
 });
 $('#manualForm').onsubmit = event => {
-  event.preventDefault(); if (!LabelLensAccount.ready()) return;
+  event.preventDefault(); if (!LabelLensAccount.canScan()) return;
   const code = normalizeCode($('#manualSerial').value);
   if (!SERIAL_FORMAT.test(code)) { toast('Use 3 letters followed by 6–10 digits'); return; }
   if (stream) stopCamera('Manual serial review.', false);
@@ -541,3 +541,4 @@ window.LabelLensScanner = {
   reset:()=> { stopCamera('Sign in and choose a product to scan.', false); source = null; rotation = 0; canvas.width = canvas.height = frozenCanvas.width = frozenCanvas.height = 0; $('#manualSerial').value = ''; renderPhoto(); clearDraft(); }
 };
 renderList(); syncControls();
+
