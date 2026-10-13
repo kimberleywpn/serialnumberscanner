@@ -158,7 +158,7 @@
     const count = draft.length;
     if (!confirm(`Submit ${count} serial${count === 1 ? '' : 's'} now?`)) return;
     const epoch = authEpoch;
-    const payload = {product_id:product().id, litres:el('productLitres').value, dealer:el('dealerName').value.trim(), batch:el('batchName').value.trim(), serials:draft.map(item => ({code:item.code,method:item.method || 'manual',inferred:Boolean(item.inferred),edited:Boolean(item.edited)}))};
+    const payload = {product_id:product().id, litres:el('productLitres').value, dealer:el('dealerName').value.trim(), batch:el('batchName').value.trim(), serials:draft.map(item => ({code:item.code,method:item.method === 'hybrid' ? 'qr' : item.method || 'manual',inferred:Boolean(item.inferred),edited:Boolean(item.edited)}))};
     const fingerprint = JSON.stringify(payload);
     if (!retry || retry.fingerprint !== fingerprint) retry = {fingerprint, id:crypto.randomUUID()};
     submitting = true; scanner()?.pause(); sync(); status('submissionStatus', 'Saving confirmed serials…');
