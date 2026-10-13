@@ -69,6 +69,7 @@
     el('productRating').disabled = readOnly || !el('productModel').value;
     el('productType').disabled = readOnly || !el('productRating').value;
     el('submitBatch').disabled = submitting || !draft.length || !ready();
+    el('newSubmission').disabled = submitting || !canScan();
     el('submitBatch').textContent = submitting ? 'Submitting…' : `3. Submit ${draft.length ? draft.length + ' serial' + (draft.length === 1 ? '' : 's') : 'list'}`;
     el('manualAdd').disabled = !canScan(); el('manualSerial').disabled = !canScan();
     el('signOut').disabled = submitting;
@@ -109,6 +110,21 @@
   el('productForm').addEventListener('change', sync);
   el('productForm').onsubmit = event => event.preventDefault();
   function draftChanged(items) { draft = items; sync(); }
+  function startNewSubmission() {
+    if (submitting || !canScan()) return;
+    const hasCurrentWork = draft.length || [...el('productForm').elements].some(field => field.value);
+    if (hasCurrentWork && !confirm('Clear the current unsubmitted serials and product details? Submitted history will not be deleted.')) return;
+    scanner()?.reset();
+    draft = [];
+    el('productForm').reset();
+    resetSelect('productModel', 'Choose model');
+    resetSelect('productRating', 'Choose rating');
+    resetSelect('productType', 'Choose type');
+    el('productDetails').textContent = ''; el('submissionSummary').textContent = '';
+    status('submissionStatus', 'New submission ready. Scan serials or choose the product details first.');
+    sync();
+  }
+  el('newSubmission').onclick = startNewSubmission;
   async function enter(result) {
     const epoch = ++authEpoch;
     if (result.access_token) { accessToken = result.access_token; localStorage.setItem(TOKEN_KEY, accessToken); }
