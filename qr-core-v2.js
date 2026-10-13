@@ -8,7 +8,7 @@
   function parsePayload(payload) {
     if (typeof payload !== 'string') return null;
     const plain = payload.trim().toUpperCase();
-    if (/^TAA\d{7,10}$/.test(plain)) return {code:plain, method:'qr', inferred:false};
+    if (/^(?:TAA|TBA|THA)\d{7,10}$/.test(plain)) return {code:plain, method:'qr', inferred:false};
     try {
       const url = new URL(payload);
       // Only recognize the exact link format observed on the user's sample labels.
