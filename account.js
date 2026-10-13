@@ -70,7 +70,7 @@
     el('productType').disabled = readOnly || !el('productRating').value;
     el('submitBatch').disabled = submitting || !draft.length || !ready();
     el('newSubmission').disabled = submitting || !canScan();
-    el('submitBatch').textContent = submitting ? 'Submitting…' : `3. Submit ${draft.length ? draft.length + ' serial' + (draft.length === 1 ? '' : 's') : 'list'}`;
+    el('submitBatch').textContent = submitting ? 'Submitting…' : `Submit ${draft.length ? draft.length + ' serial' + (draft.length === 1 ? '' : 's') : 'serials'}`;
     el('manualAdd').disabled = !canScan(); el('manualSerial').disabled = !canScan();
     el('signOut').disabled = submitting;
     el('exportExcel').disabled = exporting || !user || user.role !== 'admin';
