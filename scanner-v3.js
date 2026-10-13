@@ -520,7 +520,7 @@ $('#scan').onclick = async () => {
     if (ticket !== session || cropTicket !== cropVersion) return;
     if (qrReadings.length) {
       detected = qrReadings.filter(reading=>!alreadyAdded(reading.code) && !confirmedReads.has(reading.code)); renderDetections();
-      liveStatus(detected.length ? `${detected.length} QR-derived serial${detected.length === 1 ? '' : 's'} found. Check against the printed labels.` : 'All decoded QR serials are already in your list.');
+      liveStatus(detected.length ? `${detected.length} serial${detected.length === 1 ? '' : 's'} read from QR data. Check against the printed labels.` : 'All decoded QR serials are already in your list.');
       if (detected.length) $('#textTray').scrollIntoView({behavior:'smooth',block:'nearest'});
       else toast('All decoded QR serials are already in your list');
       return;
