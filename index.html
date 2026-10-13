@@ -9,10 +9,10 @@
   <link rel="stylesheet" href="account.css?v=3.4" />
   <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%23101a16'/%3E%3Cpath d='M15 15h13v13H15zm21 0h13v13H36zM15 36h13v13H15z' fill='none' stroke='%238ee6a8' stroke-width='5'/%3E%3Cpath d='M37 37h5v5h-5zm8 0h5v13h-5zm-8 8h5v5h-5z' fill='%23fff'/%3E%3C/svg%3E" />
   <script id="ocrLibrary" src="https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js" async></script>
-  <script src="account.js?v=3.8" defer></script>
+  <script src="account.js?v=3.9" defer></script>
   <script src="jsqr-1.4.0.js?v=3.4" defer></script>
   <script src="qr-core-v2.js?v=3.7" defer></script>
-  <script src="scanner-v3.js?v=3.8" defer></script>
+  <script src="scanner-v3.js?v=3.9" defer></script>
   <style>
     :root{--ink:#101a16;--paper:#f3f7f3;--card:#fff;--muted:#64716a;--line:#dce5dd;--mint:#8ee6a8;--mint-dark:#145d31;--orange:#ffb45e;--danger:#a63d35;--shadow:0 18px 45px rgba(16,26,22,.11)}
     *{box-sizing:border-box}html{font-family:Inter,ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;background:var(--paper);color:var(--ink)}body{margin:0;min-height:100vh;background:radial-gradient(circle at 10% 0,rgba(142,230,168,.19),transparent 25rem),var(--paper)}button,input{font:inherit}button{cursor:pointer}.shell{max-width:1080px;margin:auto;padding:0 12px calc(92px + env(safe-area-inset-bottom))}
@@ -34,10 +34,8 @@
 </head>
 <body>
   <main class="shell">
-    <header class="topbar"><div class="brand"><span class="brandmark" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none"><path d="M3 3h7v7H3V3Zm11 0h7v7h-7V3ZM3 14h7v7H3v-7Z" stroke="#8ee6a8" stroke-width="2"/><path d="M15 15h2v2h-2zm4 0h2v6h-2zm-4 4h2v2h-2z" fill="white"/></svg></span>Label Lens</div><div class="privacy">Images stay on-device</div></header>
-    <section id="loginPanel" class="panel account-panel">
-      <div class="eyebrow">Your scanner workspace</div><h1>Sign in to Label Lens</h1>
-      <p>Use your shared battery / sales dashboard account. Your submissions are saved to your own history.</p>
+    <header class="topbar"><div class="brand"><span class="brandmark" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none"><path d="M3 3h7v7H3V3Zm11 0h7v7h-7V3ZM3 14h7v7H3v-7Z" stroke="#8ee6a8" stroke-width="2"/><path d="M15 15h2v2h-2zm4 0h2v6h-2zm-4 4h2v2h-2z" fill="white"/></svg></span>Label Lens</div></header>
+    <section id="loginPanel" class="panel account-panel" aria-label="Sign in">
       <form id="loginForm" class="account-form">
         <label>Username<input id="username" autocomplete="username" autocapitalize="none" spellcheck="false" maxlength="60" required /></label>
         <label>Password<input id="password" type="password" autocomplete="current-password" maxlength="72" required /></label>
@@ -79,7 +77,6 @@
       </div>
       <aside class="panel action">
         <button class="scan" id="scan" disabled>Scan labels</button>
-        <p class="scan-help" id="scanHelp">Scan QR codes first. If none are supported, printed-text OCR is tried. Rotate the photo for the text fallback.</p>
         <p class="selection-hint" id="selectionHint" hidden>Centre one QR inside the yellow guide. Keep the whole QR visible and wait for focus. QR-derived serials are estimates, not authenticity checks.</p>
         <section class="confirmation" id="confirmation" aria-labelledby="confirmTitle" hidden>
           <h2 id="confirmTitle">Confirm serial</h2><p id="readingNote">Check the reading. You can correct it before adding.</p>
@@ -102,7 +99,7 @@
       <p id="historyStatus" class="form-status" role="status"></p><div id="savedResults" class="saved-results"></div><button id="olderHistory" class="mini" type="button" hidden>Load older submissions</button>
     </section>
     </div>
-    <p class="version-note">Scanner v3.8 · On-device image processing · Confirmed submissions saved to server</p>
+    <p class="version-note">Scanner v3.9</p>
   </main><div class="toast" id="toast">Copied</div>
 </body>
 </html>
