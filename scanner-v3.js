@@ -36,10 +36,19 @@ function save() {
   renderList();
   LabelLensAccount.draftChanged(items);
 }
+const SERIAL_FORMAT = /^[A-Z]{3}\d{6,10}$/;
+const LABEL_SERIAL = /(?:TAA|TBA|THA)\d{6,10}(?!\d)/;
+const LABEL_SERIAL_OR_MISSING_ZERO = /(?:TAA|TBA|THA)\d{5,10}(?!\d)/g;
+
 function normalizeCode(text) { return text.toUpperCase().replace(/[^A-Z0-9]/g, ''); }
+function recoverLeadingZero(code) {
+  // OCR can drop a faint first zero. Only recover it when the resulting serial
+  // would otherwise be too short to be valid: TAA80000 becomes TAA080000.
+  return /^(?:TAA|TBA|THA)\d{5}$/.test(code) ? code.slice(0, 3) + '0' + code.slice(3) : code;
+}
 function extractCode(text, strict = false) {
   const clean = normalizeCode(text);
-  const label = clean.match(/(?:TAA|TBA|THA)\d{7,10}(?!\d)/)?.[0];
+  const label = clean.match(LABEL_SERIAL)?.[0] || recoverLeadingZero(clean.match(/(?:TAA|TBA|THA)\d{5}(?!\d)/)?.[0] || '');
   if (label || strict) return label || '';
   const candidates = (text.toUpperCase().match(/[A-Z0-9][A-Z0-9 -]{5,}/g) || []).map(normalizeCode);
   return candidates.sort((a, b) => b.length - a.length)[0] || (clean.length >= 5 ? clean : '');
@@ -69,10 +78,10 @@ function syncControls() {
 function validateConfirmation() {
   const code = normalizeCode($('#detectedCode').value);
   const duplicate = alreadyAdded(code);
-  const valid = /^[A-Z]{3}\d{7,10}$/.test(code);
+  const valid = SERIAL_FORMAT.test(code);
   $('#addCode').disabled = !LabelLensAccount.ready() || !valid || duplicate || items.length >= 500;
   $('#copyDetected').disabled = !code.length;
-  $('#confirmError').textContent = duplicate ? 'This code is already in your draft.' : !valid ? 'Use 3 letters followed by 7–10 digits.' : items.length >= 500 ? 'Submit this draft before adding more serials.' : '';
+  $('#confirmError').textContent = duplicate ? 'This code is already in your draft.' : !valid ? 'Use 3 letters followed by 6–10 digits.' : items.length >= 500 ? 'Submit this draft before adding more serials.' : '';
   return code;
 }
 function showConfirmation(code, origin) {
@@ -101,7 +110,7 @@ $('#confirmForm').addEventListener('submit', event => {
   event.preventDefault();
   if (!pending) return;
   const code = validateConfirmation();
-  if (!LabelLensAccount.ready() || !/^[A-Z]{3}\d{7,10}$/.test(code) || alreadyAdded(code) || items.length >= 500) return;
+  if (!LabelLensAccount.ready() || !SERIAL_FORMAT.test(code) || alreadyAdded(code) || items.length >= 500) return;
   lastConfirmedRead = pending.code;
   confirmedReads.add(pending.code);
   detected = detected.filter(reading => reading.code !== pending.code);
@@ -178,7 +187,7 @@ function findSerials(data, frame, cropped = false) {
   const found = new Map();
   const collect = unit => {
     if (unit.confidence < 45 || !unit.bbox) return;
-    const codes = normalizeCode(unit.text || '').match(/(?:TAA|TBA|THA)\d{7,10}(?!\d)/g) || [];
+    const codes = (normalizeCode(unit.text || '').match(LABEL_SERIAL_OR_MISSING_ZERO) || []).map(recoverLeadingZero);
     for (const code of codes) {
       if (found.has(code)) continue;
       const {x0, y0, x1, y1} = unit.bbox;
@@ -520,7 +529,7 @@ window.addEventListener('pagehide', () => {
 $('#manualForm').onsubmit = event => {
   event.preventDefault(); if (!LabelLensAccount.ready()) return;
   const code = normalizeCode($('#manualSerial').value);
-  if (!/^[A-Z]{3}\d{7,10}$/.test(code)) { toast('Use 3 letters followed by 7–10 digits'); return; }
+  if (!SERIAL_FORMAT.test(code)) { toast('Use 3 letters followed by 6–10 digits'); return; }
   if (stream) stopCamera('Manual serial review.', false);
   showConfirmation(code, 'manual'); pending.method = 'manual'; pending.inferred = false;
   $('#readingNote').textContent = 'Manually entered. Check against the printed label before adding.';
@@ -532,4 +541,3 @@ window.LabelLensScanner = {
   reset:()=> { stopCamera('Sign in and choose a product to scan.', false); source = null; rotation = 0; canvas.width = canvas.height = frozenCanvas.width = frozenCanvas.height = 0; $('#manualSerial').value = ''; renderPhoto(); clearDraft(); }
 };
 renderList(); syncControls();
-
