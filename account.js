@@ -16,7 +16,9 @@
     scanner()?.reset(); el('productForm').reset(); el('savedResults').replaceChildren();
     el('historyScope').value = 'mine'; el('historyQuery').value = '';
     el('productBrand').replaceChildren(new Option('Choose brand', ''));
-    el('productVariant').replaceChildren(new Option('Choose product', ''));
+    el('productModel').replaceChildren(new Option('Choose model', ''));
+    el('productRating').replaceChildren(new Option('Choose rating', ''));
+    el('productType').replaceChildren(new Option('Choose type', ''));
     el('productLitres').replaceChildren(new Option('Choose litres', ''));
     el('productDetails').textContent = ''; el('submissionSummary').textContent = '';
     el('appContent').hidden = true; el('loginPanel').hidden = false;
@@ -44,20 +46,29 @@
     if (!result) throw new Error('The scanner backend is not available at this address.');
     return result;
   }
-  function product() { return products.find(entry => entry.id === el('productVariant').value); }
+  const unique = values => [...new Set(values)].sort((a, b) => a.localeCompare(b));
+  const gradeLabel = value => value.replace(/^SAE\s*/i, '');
+  const typeLabel = value => ({'FULLY SYNTHETIC':'Fully', 'SEMI SYNTHETIC':'Semi', 'MINERAL ENGINE OIL':'Mineral', 'MINERAL':'Mineral'}[value.toUpperCase()] || value);
+  const resetSelect = (id, label) => el(id).replaceChildren(new Option(label, ''));
+  const addOptions = (id, entries) => entries.forEach(([label, value]) => el(id).add(new Option(label, value)));
+  function product() { return products.find(entry => entry.id === el('productType').value); }
   function ready() {
     return Boolean(user && user.role !== 'viewer' && !submitting && product() && el('productForm').checkValidity() && el('dealerName').value.trim() && el('batchName').value.trim());
   }
   function sync() {
     const locked = draft.length > 0 || submitting;
-    el('productForm').querySelectorAll('input,select').forEach(field => { field.disabled = locked || user?.role === 'viewer'; });
+    const readOnly = locked || user?.role === 'viewer';
+    ['productBrand','productLitres','dealerName','batchName'].forEach(id => { el(id).disabled = readOnly; });
+    el('productModel').disabled = readOnly || !el('productBrand').value;
+    el('productRating').disabled = readOnly || !el('productModel').value;
+    el('productType').disabled = readOnly || !el('productRating').value;
     el('submitBatch').disabled = submitting || !draft.length || !ready();
     el('submitBatch').textContent = submitting ? 'Submitting…' : `3. Submit ${draft.length ? draft.length + ' serial' + (draft.length === 1 ? '' : 's') : 'list'}`;
     el('manualAdd').disabled = !ready(); el('manualSerial').disabled = !ready();
     el('signOut').disabled = submitting;
     const selected = product();
-    el('productDetails').textContent = selected ? `${selected.oil_type} · ${selected.viscosity} · ${selected.ratings}` : '';
-    el('submissionSummary').textContent = selected && draft.length ? `${selected.brand} ${selected.model} · ${selected.viscosity} · ${el('productLitres').value} — Dealer: ${el('dealerName').value.trim()} — Batch: ${el('batchName').value.trim()}` : '';
+    el('productDetails').textContent = selected ? `${selected.model} | ${gradeLabel(selected.viscosity)} | ${typeLabel(selected.oil_type)}\nSpecification: ${selected.ratings}` : '';
+    el('submissionSummary').textContent = selected && draft.length ? `${selected.brand} · ${selected.model} | ${gradeLabel(selected.viscosity)} | ${typeLabel(selected.oil_type)} · ${el('productLitres').value} — Dealer: ${el('dealerName').value.trim()} — Batch: ${el('batchName').value.trim()}` : '';
     status('setupStatus', user?.role === 'viewer' ? 'Your shared account is read-only. You can view your history.' : locked ? 'Product and batch are locked to this draft. Submit or clear the draft to change them.' : ready() ? 'Ready to scan. These details apply to every serial in this draft.' : 'Complete the fields before scanning.');
     scanner()?.sync();
   }
@@ -68,9 +79,22 @@
     sync();
   }
   el('productBrand').onchange = () => {
-    el('productVariant').replaceChildren(new Option('Choose product', ''));
-    products.filter(entry => entry.brand === el('productBrand').value).sort((a,b) => `${a.model} ${a.viscosity} ${a.oil_type}`.localeCompare(`${b.model} ${b.viscosity} ${b.oil_type}`)).forEach(entry => {
-      el('productVariant').add(new Option(`${entry.model} · ${entry.viscosity} · ${entry.oil_type} · ${entry.ratings}`, entry.id));
+    resetSelect('productModel', 'Choose model');
+    resetSelect('productRating', 'Choose rating');
+    resetSelect('productType', 'Choose type');
+    addOptions('productModel', unique(products.filter(entry => entry.brand === el('productBrand').value).map(entry => entry.model)).map(value => [value, value]));
+    sync();
+  };
+  el('productModel').onchange = () => {
+    resetSelect('productRating', 'Choose rating');
+    resetSelect('productType', 'Choose type');
+    addOptions('productRating', unique(products.filter(entry => entry.brand === el('productBrand').value && entry.model === el('productModel').value).map(entry => entry.viscosity)).map(value => [gradeLabel(value), value]));
+    sync();
+  };
+  el('productRating').onchange = () => {
+    resetSelect('productType', 'Choose type');
+    products.filter(entry => entry.brand === el('productBrand').value && entry.model === el('productModel').value && entry.viscosity === el('productRating').value).sort((a,b) => a.oil_type.localeCompare(b.oil_type)).forEach(entry => {
+      el('productType').add(new Option(typeLabel(entry.oil_type), entry.id));
     });
     sync();
   };
