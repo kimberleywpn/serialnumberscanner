@@ -21,9 +21,19 @@
       if (bytes.slice(0,4).some(byte => byte !== 0) || bytes[12] !== 0x30 || bytes[13] !== 0x81 || bytes[15] !== 0x02) return null;
       const counter = new DataView(bytes.buffer).getUint32(8, false);
       if (counter > 999998) return null;
-      // A fast fallback candidate only; printed-text OCR remains preferred.
-      return {code:'TAA8' + String(counter + 1).padStart(6,'0'), method:'qr', inferred:true};
+      // This payload supplies a suffix only. Its front must come from the same label's text.
+      const suffix = String(counter + 1).padStart(6,'0');
+      return {code:suffix, suffix, method:'qr', inferred:true};
     } catch { return null; }
+  }
+
+  function combineFront(text, suffix) {
+    if (!/^\d{6}$/.test(suffix || '')) return null;
+    const normalized = String(text || '').toUpperCase().replace(/\s+/g, '');
+    const digit = {O:'0',I:'1',L:'1',S:'5'};
+    const fronts = [...normalized.matchAll(/(T(?:AA|BA|HA))([0-9OILS])/g)].map(match => match[1] + (digit[match[2]] || match[2]));
+    const unique = [...new Set(fronts)];
+    return unique.length === 1 ? unique[0] + suffix : null;
   }
 
   function positions(length, size, step) {
@@ -162,7 +172,7 @@
         const reading = parsePayload(qr.data);
         options.onDecode?.({supported:Boolean(reading)});
         if (reading && !results.has(reading.code)) {
-          results.set(reading.code,{...reading,bounds:{left:(region.x+x0)/width,top:(region.y+y0)/height,width:(x1-x0)/width,height:(y1-y0)/height}});
+          results.set(reading.code,{...reading,corners:corners.map(point=>({x:(region.x+point.x)/width,y:(region.y+point.y)/height})),bounds:{left:(region.x+x0)/width,top:(region.y+y0)/height,width:(x1-x0)/width,height:(y1-y0)/height}});
           if(options.stopWhen?.(reading)) return [...results.values()].sort((a,b)=>a.bounds.top-b.bounds.top || a.bounds.left-b.bounds.left);
         }
         // Mask a decoded QR in this tile to find other labels, never modifying the source.
@@ -175,6 +185,6 @@
     }
     return [...results.values()].sort((a,b)=>a.bounds.top-b.bounds.top || a.bounds.left-b.bounds.left);
   }
-  return {parsePayload,scanFrame,finderRegions};
+  return {parsePayload,scanFrame,finderRegions,combineFront};
 });
 
