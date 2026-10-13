@@ -155,8 +155,7 @@
     const card = document.createElement('article'); card.className = 'saved-card';
     const p = entry.product;
     const codes = entry.serials.map(serial => serial.code).join('\n');
-    const estimates = entry.serials.filter(serial => serial.inferred).length;
-    card.innerHTML = `<h3>${escape(p.brand)} ${escape(p.model)} · ${escape(entry.litres)}</h3><p>${escape(p.viscosity)} · ${escape(p.oil_type)}<br>${escape(p.ratings)}</p><p>Dealer: ${escape(entry.dealer)}<br>Batch: ${escape(entry.batch)}</p><p>#${entry.id} · ${escape(entry.username || user.username)} · ${escape(new Date(entry.created).toLocaleString())}</p><div class="saved-codes">${escape(codes)}</div>${estimates ? `<p>${estimates} QR-derived estimate${estimates === 1 ? '' : 's'} recorded; not authenticity checks.</p>` : ''}`;
+    card.innerHTML = `<h3>${escape(p.brand)} | ${escape(p.model)} | ${escape(p.ratings)} | ${escape(entry.litres)}</h3><p>Serial numbers</p><div class="saved-codes">${escape(codes)}</div>`;
     el('savedResults').append(card);
   }
   async function loadHistory(append = false) {
