@@ -89,7 +89,7 @@ function showConfirmation(code, origin) {
   $('#confirmTitle').textContent = 'Confirm serial';
   $('#readingNote').textContent = pending.inferred
     ? 'QR-based estimate. Compare it with the printed serial before adding.'
-    : pending.method === 'qr' ? 'Read directly from QR data. Check before adding.' : 'Read from printed text. Check before adding.';
+    : pending.method === 'qr' ? 'Read directly from QR data. Check before adding.' : pending.method === 'hybrid' ? 'Front read from printed text; last six digits read from QR. Check before adding.' : 'Read from printed text. Check before adding.';
   $('#detectedCode').value = code;
   $('#last').style.display = 'none';
   validateConfirmation();
@@ -190,7 +190,7 @@ function renderDetections() {
   for (const reading of available) {
     const choose = () => showConfirmation(reading.code, stream ? 'live' : 'photo');
     const button = document.createElement('button');
-    button.type = 'button'; button.className = 'serial-choice'; button.textContent = reading.code + (reading.inferred ? ' · QR estimate' : reading.method === 'qr' ? ' · QR' : '');
+    button.type = 'button'; button.className = 'serial-choice'; button.textContent = reading.code + (reading.inferred ? ' · QR estimate' : reading.method === 'hybrid' ? ' · Text + QR' : reading.method === 'qr' ? ' · QR' : '');
     button.setAttribute('aria-label', `Select serial ${reading.code}`); button.onclick = choose;
     $('#detectedChoices').append(button);
     if (reading.bounds) {
@@ -460,6 +460,40 @@ function cropFrame() {
   context.drawImage(input, x, y, cropWidth, cropHeight, 0, 0, result.width, result.height);
   return result;
 }
+async function readHybridSerials(frame, qrReadings, ticket) {
+  const direct = qrReadings.filter(reading => !reading.inferred);
+  const partial = qrReadings.filter(reading => reading.inferred && reading.suffix && reading.bounds);
+  if (!partial.length) return direct;
+  const worker = await getWorker();
+  await worker.setParameters({tessedit_pageseg_mode:'7'});
+  for (const reading of partial) {
+    if (ticket !== session) break;
+    if (!reading.corners) continue;
+    const [tl,tr,bl,br] = reading.corners.map(p=>({x:p.x*frame.width,y:p.y*frame.height}));
+    const ax=br.x-bl.x,ay=br.y-bl.y,bx=bl.x-tl.x,by=bl.y-tl.y;
+    const determinant=ax*by-ay*bx;
+    if (Math.abs(determinant)<100) continue;
+    const ox=bl.x-ax*.12+bx*.025,oy=bl.y-ay*.12+by*.025;
+    const crop = document.createElement('canvas');
+    const contentWidth=Math.min(1740,Math.round(Math.hypot(ax,ay)*3*1.3));
+    crop.width = contentWidth+60; crop.height = Math.round(contentWidth*.19/1.3)+60;
+    const context = crop.getContext('2d');
+    context.fillStyle='#fff';context.fillRect(0,0,crop.width,crop.height);
+    const scale=contentWidth/1.3;
+    context.setTransform(scale*by/determinant,-scale*ay/determinant,-scale*bx/determinant,scale*ax/determinant,30+scale*(bx*oy-by*ox)/determinant,30+scale*(ay*ox-ax*oy)/determinant);
+    context.filter = 'grayscale(1)';context.drawImage(frame,0,0);
+    let result = await worker.recognize(crop);
+    let code = LabelQR.combineFront(result.data.text,reading.suffix);
+    if (!code || result.data.confidence < 30) {
+      await worker.setParameters({tessedit_pageseg_mode:'11'});
+      result = await worker.recognize(crop);
+      code = LabelQR.combineFront(result.data.text,reading.suffix);
+      await worker.setParameters({tessedit_pageseg_mode:'7'});
+    }
+    if (code && result.data.confidence >= 30) direct.push({...reading,code,method:'hybrid',inferred:false});
+  }
+  return direct;
+}
 function getWorker() {
   if (!workerPromise) workerPromise = (async () => {
     if (!window.Tesseract) await new Promise((resolve,reject)=>{
@@ -510,16 +544,17 @@ async function scanLive(capture = false) {
     const centre=centreCameraFrame();
     let rawReadings=await readQR(centre.frame,false,ticket);
     const centreDiagnostics={...qrDiagnostics};
-    rawReadings=rawReadings.map(reading=>({...reading,bounds:{left:centre.bounds.left+reading.bounds.left*centre.bounds.width,top:centre.bounds.top+reading.bounds.top*centre.bounds.height,width:reading.bounds.width*centre.bounds.width,height:reading.bounds.height*centre.bounds.height}}));
+    rawReadings=rawReadings.map(reading=>({...reading,corners:reading.corners?.map(p=>({x:centre.bounds.left+p.x*centre.bounds.width,y:centre.bounds.top+p.y*centre.bounds.height})),bounds:{left:centre.bounds.left+reading.bounds.left*centre.bounds.width,top:centre.bounds.top+reading.bounds.top*centre.bounds.height,width:reading.bounds.width*centre.bounds.width,height:reading.bounds.height*centre.bounds.height}}));
     if(!rawReadings.some(reading=>!alreadyAdded(reading.code) && !confirmedReads.has(reading.code))) {
       const fullReadings=await readQR(display,Boolean(capture),ticket);
       rawReadings=[...new Map([...rawReadings,...fullReadings].map(reading=>[reading.code,reading])).values()];
       qrDiagnostics.decoded+=centreDiagnostics.decoded;qrDiagnostics.unsupported+=centreDiagnostics.unsupported;
     }
-    const qrReadings = rawReadings.filter(reading=>!alreadyAdded(reading.code) && !confirmedReads.has(reading.code));
+    const combinedQR = await readHybridSerials(display,rawReadings,ticket);
+    const qrReadings = combinedQR.filter(reading=>!alreadyAdded(reading.code) && !confirmedReads.has(reading.code));
     if (ticket !== session || cropTicket !== cropVersion || !stream || pending) return;
     if (qrReadings.length) { freezeCamera(display,qrReadings); return; }
-    if(rawReadings.length) {liveStatus('QR read — this serial is already in your list. Point at a different label.');return;}
+    if(combinedQR.length) {liveStatus('QR read — this serial is already in your list. Point at a different label.');return;}
     if(!qrDiagnostics.available) {liveStatus('QR decoder did not load. Refresh this page while online.');return;}
     // Give QR tiles a chance to cover the view before loading the larger OCR engine.
     if (!capture && qrPass % 3 !== 0 && typeof window.jsQR === 'function') {
@@ -552,7 +587,8 @@ $('#scan').onclick = async () => {
     let qrReadings = [];
     if (!cropped) qrReadings = await readQR(frame.display,true,ticket);
     if (ticket !== session || cropTicket !== cropVersion) return;
-    const directQR = qrReadings.filter(reading => !reading.inferred);
+    const directQR = await readHybridSerials(frame.display,qrReadings,ticket);
+    if (ticket !== session || cropTicket !== cropVersion) return;
     if (directQR.length) {
       detected = directQR.filter(reading=>!alreadyAdded(reading.code) && !confirmedReads.has(reading.code)); renderDetections();
       liveStatus(detected.length ? `${detected.length} serial${detected.length === 1 ? '' : 's'} read from QR data. Check against the printed labels.` : 'All decoded QR serials are already in your list.');
@@ -564,10 +600,10 @@ $('#scan').onclick = async () => {
     const image = frame.image, worker = await getWorker();
     const readings = await readPrintedSerials(worker, image, cropped);
     if (ticket !== session || cropTicket !== cropVersion) return;
-    const combined = [...readings, ...qrReadings.filter(reading => reading.inferred)];
+    const combined = readings;
     detected = [...new Map(combined.map(reading => [reading.code, reading])).values()].filter(reading => !alreadyAdded(reading.code) && !confirmedReads.has(reading.code)); renderDetections();
     if (combined.length && !detected.length) { toast('All detected serials are already in your list'); return; }
-    if (detected.length) { liveStatus(readings.length ? 'Printed text found. QR estimate is also available for comparison.' : 'QR estimate found. Check it against the printed serial.'); $('#textTray').scrollIntoView({behavior:'smooth', block:'nearest'}); }
+    if (detected.length) { liveStatus('Printed text found. Check it against the label.'); $('#textTray').scrollIntoView({behavior:'smooth', block:'nearest'}); }
     else if (cropped) {
       toast('No clear text found — adjust the crop');
     } else toast('No clear serial found — rotate, move closer, or use precision crop');
