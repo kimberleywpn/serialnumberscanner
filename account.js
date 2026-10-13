@@ -109,6 +109,9 @@
   el('productForm').addEventListener('input', sync);
   el('productForm').addEventListener('change', sync);
   el('productForm').onsubmit = event => event.preventDefault();
+  el('productForm').addEventListener('keydown', event => {
+    if (event.key === 'Enter') event.preventDefault();
+  });
   function draftChanged(items) { draft = items; sync(); }
   function startNewSubmission() {
     if (submitting || !canScan()) return;
