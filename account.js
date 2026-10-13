@@ -155,7 +155,7 @@
     const card = document.createElement('article'); card.className = 'saved-card';
     const p = entry.product;
     const codes = entry.serials.map(serial => serial.code).join('\n');
-    card.innerHTML = `<h3>${escape(p.brand)} | ${escape(p.model)} | ${escape(p.ratings)} | ${escape(entry.litres)}</h3><p>Serial numbers</p><div class="saved-codes">${escape(codes)}</div>`;
+    card.innerHTML = `<h3>${escape(p.brand)} | ${escape(p.model)} | ${escape(p.viscosity)} | ${escape(entry.litres)}</h3><p>Serial numbers</p><div class="saved-codes">${escape(codes)}</div>`;
     el('savedResults').append(card);
   }
   async function loadHistory(append = false) {
