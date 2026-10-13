@@ -4,7 +4,7 @@
   const API_BASE = 'https://m9kw6gfq-8088.asse.devtunnels.ms';
   const TOKEN_KEY = 'label_lens_access_token';
   let accessToken = localStorage.getItem(TOKEN_KEY) || '';
-  let user = null, csrf = '', products = [], draft = [], submitting = false;
+  let user = null, csrf = '', products = [], draft = [], submitting = false, exporting = false;
   let retry = null, nextBefore = null, historyEpoch = 0, historyBusy = false, authEpoch = 0;
   const escape = value => String(value).replace(/[&<>"']/g, char => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
   function status(id, text, error = false) { el(id).textContent = text; el(id).dataset.error = String(error); }
@@ -12,7 +12,7 @@
   function clearPrivate() {
     authEpoch++; historyEpoch++; user = null; csrf = ''; products = []; draft = []; retry = null;
     accessToken = ''; localStorage.removeItem(TOKEN_KEY);
-    nextBefore = null; submitting = false; historyBusy = false;
+    nextBefore = null; submitting = false; exporting = false; historyBusy = false;
     scanner()?.reset(); el('productForm').reset(); el('savedResults').replaceChildren();
     el('historyScope').value = 'mine'; el('historyQuery').value = '';
     el('productBrand').replaceChildren(new Option('Choose brand', ''));
@@ -21,6 +21,7 @@
     el('productType').replaceChildren(new Option('Choose type', ''));
     el('productLitres').replaceChildren(new Option('Choose litres', ''));
     el('productDetails').textContent = ''; el('submissionSummary').textContent = '';
+    el('exportExcel').hidden = true; el('exportExcel').disabled = false;
     el('appContent').hidden = true; el('loginPanel').hidden = false;
     el('signedInAs').textContent = ''; el('password').value = '';
     status('submissionStatus', 'Drafts are held in memory. Submit before leaving or signing out.');
@@ -66,6 +67,7 @@
     el('submitBatch').textContent = submitting ? 'Submitting…' : `3. Submit ${draft.length ? draft.length + ' serial' + (draft.length === 1 ? '' : 's') : 'list'}`;
     el('manualAdd').disabled = !ready(); el('manualSerial').disabled = !ready();
     el('signOut').disabled = submitting;
+    el('exportExcel').disabled = exporting || !user || user.role !== 'admin';
     const selected = product();
     el('productDetails').textContent = selected ? `${selected.model} | ${gradeLabel(selected.viscosity)} | ${typeLabel(selected.oil_type)}\nSpecification: ${selected.ratings}` : '';
     el('submissionSummary').textContent = selected && draft.length ? `${selected.brand} · ${selected.model} | ${gradeLabel(selected.viscosity)} | ${typeLabel(selected.oil_type)} · ${el('productLitres').value} — Dealer: ${el('dealerName').value.trim()} — Batch: ${el('batchName').value.trim()}` : '';
@@ -108,6 +110,7 @@
     user = result.user; csrf = result.csrf;
     el('password').value = ''; el('signedInAs').textContent = `${user.username} · ${user.role === 'admin' ? 'Admin' : user.role === 'viewer' ? 'Read-only' : 'User'}`;
     el('historyScopeLabel').hidden = user.role !== 'admin';
+    el('exportExcel').hidden = user.role !== 'admin';
     const catalogue = await api('/api/products');
     if (epoch !== authEpoch) return;
     fillProducts(catalogue); el('loginPanel').hidden = true; el('appContent').hidden = false;
@@ -171,6 +174,30 @@
   }
   el('refreshHistory').onclick = () => loadHistory();
   el('olderHistory').onclick = () => loadHistory(true);
+  el('exportExcel').onclick = async () => {
+    if (!user || user.role !== 'admin' || exporting) return;
+    exporting = true; sync(); status('historyStatus', 'Preparing the Excel export…');
+    try {
+      const query = new URLSearchParams({q:el('historyQuery').value.trim()});
+      const response = await fetch(API_BASE + '/api/exports/submissions.xlsx?' + query, {
+        headers:{'Authorization':`Bearer ${accessToken}`, 'Accept':'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'},
+        credentials:'omit', cache:'no-store', signal:AbortSignal.timeout(30000)
+      });
+      if (!response.ok) {
+        const result = await response.json().catch(() => null);
+        if (response.status === 401) { clearPrivate(); status('loginStatus', 'Session ended. Please sign in again.', true); }
+        throw new Error(typeof result?.detail === 'string' ? result.detail : 'Could not create the Excel export.');
+      }
+      const file = await response.blob();
+      if (!file.size) throw new Error('The Excel export was empty.');
+      const url = URL.createObjectURL(file), link = document.createElement('a');
+      link.href = url; link.download = 'label-lens-master-submissions.xlsx'; link.click();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+      status('historyStatus', 'Excel export downloaded.');
+    } catch (error) {
+      if (user) status('historyStatus', error.message || 'Could not create the Excel export.', true);
+    } finally { exporting = false; sync(); }
+  };
   el('historyScope').onchange = () => loadHistory();
   el('historyFilter').onsubmit = event => { event.preventDefault(); loadHistory(); };
   window.addEventListener('beforeunload', event => { if (draft.length || submitting) { event.preventDefault(); event.returnValue = ''; } });
