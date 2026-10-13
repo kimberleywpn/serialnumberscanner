@@ -91,7 +91,7 @@
       </aside>
       <section class="panel history">
         <div class="history-head"><div class="history-title"><h2>2. Confirmed draft</h2><span class="count" id="count">0</span></div><div class="history-actions"><button class="mini" id="copyAll" disabled>Copy all</button><button class="mini clear" id="clearAll" disabled>Clear draft</button></div></div>
-        <details class="manual-entry"><summary>Enter a serial manually</summary><form id="manualForm" class="manual-form"><label class="sr-only" for="manualSerial">Manual serial</label><input id="manualSerial" placeholder="e.g. TBA8503749" autocapitalize="characters" autocomplete="off" maxlength="13" pattern="[A-Za-z]{3}[0-9]{7,10}" required /><button id="manualAdd" type="submit" class="btn btn-soft" disabled>Review</button></form></details>
+        <details class="manual-entry"><summary>Enter a serial manually</summary><form id="manualForm" class="manual-form"><label class="sr-only" for="manualSerial">Manual serial</label><input id="manualSerial" placeholder="e.g. TBA8503749" autocapitalize="characters" autocomplete="off" maxlength="13" pattern="[A-Za-z]{3}[0-9]{6,10}" required /><button id="manualAdd" type="submit" class="btn btn-soft" disabled>Review</button></form></details>
         <div class="empty-list" id="emptyList">Confirm serials to add them here. They are not saved to the server yet.</div><div class="results" id="results"></div>
         <div class="submit-area"><p id="submissionSummary" class="product-details"></p><button id="submitBatch" class="btn btn-main" type="button" disabled>3. Submit list</button><p id="submissionStatus" class="form-status" role="status">Drafts are held in memory. Submit before leaving or signing out.</p></div>
       </section>
@@ -106,3 +106,4 @@
   </main><div class="toast" id="toast">Copied</div>
 </body>
 </html>
+
