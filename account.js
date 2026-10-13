@@ -56,8 +56,13 @@
   function ready() {
     return Boolean(user && user.role !== 'viewer' && !submitting && product() && el('productForm').checkValidity() && el('dealerName').value.trim() && el('batchName').value.trim());
   }
+  function canScan() {
+    return Boolean(user && user.role !== 'viewer' && !submitting);
+  }
   function sync() {
-    const locked = draft.length > 0 || submitting;
+    // A draft may be collected before its product details are known. Lock the
+    // details only once they are complete, so every saved serial shares them.
+    const locked = submitting || (draft.length > 0 && ready());
     const readOnly = locked || user?.role === 'viewer';
     ['productBrand','productLitres','dealerName','batchName'].forEach(id => { el(id).disabled = readOnly; });
     el('productModel').disabled = readOnly || !el('productBrand').value;
@@ -65,13 +70,13 @@
     el('productType').disabled = readOnly || !el('productRating').value;
     el('submitBatch').disabled = submitting || !draft.length || !ready();
     el('submitBatch').textContent = submitting ? 'Submitting…' : `3. Submit ${draft.length ? draft.length + ' serial' + (draft.length === 1 ? '' : 's') : 'list'}`;
-    el('manualAdd').disabled = !ready(); el('manualSerial').disabled = !ready();
+    el('manualAdd').disabled = !canScan(); el('manualSerial').disabled = !canScan();
     el('signOut').disabled = submitting;
     el('exportExcel').disabled = exporting || !user || user.role !== 'admin';
     const selected = product();
     el('productDetails').textContent = selected ? `${selected.model} | ${gradeLabel(selected.viscosity)} | ${typeLabel(selected.oil_type)}\nSpecification: ${selected.ratings}` : '';
-    el('submissionSummary').textContent = selected && draft.length ? `${selected.brand} · ${selected.model} | ${gradeLabel(selected.viscosity)} | ${typeLabel(selected.oil_type)} · ${el('productLitres').value} — Dealer: ${el('dealerName').value.trim()} — Batch: ${el('batchName').value.trim()}` : '';
-    status('setupStatus', user?.role === 'viewer' ? 'Your shared account is read-only. You can view your history.' : locked ? 'Product and batch are locked to this draft. Submit or clear the draft to change them.' : ready() ? 'Ready to scan. These details apply to every serial in this draft.' : 'Complete the fields before scanning.');
+    el('submissionSummary').textContent = selected && draft.length && ready() ? `${selected.brand} · ${selected.model} | ${gradeLabel(selected.viscosity)} | ${typeLabel(selected.oil_type)} · ${el('productLitres').value} — Dealer: ${el('dealerName').value.trim()} — Batch: ${el('batchName').value.trim()}` : '';
+    status('setupStatus', user?.role === 'viewer' ? 'Your shared account is read-only. You can view your history.' : locked ? 'Product and batch are locked to this draft. Submit or clear the draft to change them.' : ready() ? 'Ready to submit. These details apply to every serial in this draft.' : draft.length ? `Scan complete for ${draft.length} serial${draft.length === 1 ? '' : 's'}. Complete the product and batch fields before submitting.` : 'You can scan now. Complete the fields before submitting.');
     scanner()?.sync();
   }
   function fillProducts(data) {
@@ -201,7 +206,7 @@
   el('historyScope').onchange = () => loadHistory();
   el('historyFilter').onsubmit = event => { event.preventDefault(); loadHistory(); };
   window.addEventListener('beforeunload', event => { if (draft.length || submitting) { event.preventDefault(); event.returnValue = ''; } });
-  window.LabelLensAccount = {ready, saving:() => submitting, draftChanged};
+  window.LabelLensAccount = {ready, canScan, saving:() => submitting, draftChanged};
   (async () => {
     el('signIn').disabled = true;
     if (!accessToken) { status('loginStatus', 'Sign in with your shared account.'); el('signIn').disabled = false; sync(); return; }
