@@ -218,6 +218,40 @@ function findSerials(data, frame, cropped = false) {
   (data.words || []).forEach(collect); (data.lines || []).forEach(collect);
   return [...found.values()];
 }
+function serialTextCrops(frame) {
+  if (!window.LabelQR?.finderRegions) return [];
+  const context = frame.getContext('2d', {willReadFrequently:true});
+  const regions = window.LabelQR.finderRegions(context.getImageData(0, 0, frame.width, frame.height));
+  return regions.slice(0, 12).map(region => {
+    // On these labels the printed serial sits directly below the QR. Reading
+    // this narrow strip as one line is far more reliable than whole-photo OCR.
+    const x = Math.max(0, Math.floor(region.x - region.w * .22));
+    const y = Math.max(0, Math.floor(region.y + region.h * .76));
+    const width = Math.min(frame.width - x, Math.ceil(region.w * 1.48));
+    const height = Math.min(frame.height - y, Math.max(34, Math.ceil(region.h * .55)));
+    if (width < 40 || height < 24) return null;
+    const crop = document.createElement('canvas');
+    crop.width = Math.min(1600, width * 2); crop.height = Math.min(500, height * 2);
+    const cropContext = crop.getContext('2d');
+    cropContext.filter = 'grayscale(1) contrast(2.1)';
+    cropContext.drawImage(frame, x, y, width, height, 0, 0, crop.width, crop.height);
+    return crop;
+  }).filter(Boolean);
+}
+async function readPrintedSerials(worker, image, cropped = false) {
+  await worker.setParameters({tessedit_pageseg_mode: cropped ? '7' : '11'});
+  const {data} = await worker.recognize(image);
+  const readings = findSerials(data, image, cropped);
+  if (readings.length || cropped) return readings;
+  const recovered = new Map();
+  for (const crop of serialTextCrops(image)) {
+    await worker.setParameters({tessedit_pageseg_mode: '7'});
+    const result = await worker.recognize(crop);
+    const code = extractCode(result.data.text, true);
+    if (code) recovered.set(code, {code, method:'ocr', inferred:false, bounds:null});
+  }
+  return [...recovered.values()];
+}
 function wholeFrame() {
   const input = stream ? video : canvas;
   const width = stream ? video.videoWidth : canvas.width, height = stream ? video.videoHeight : canvas.height;
@@ -492,15 +526,14 @@ async function scanLive(capture = false) {
     }
     liveStatus('No supported QR found. Trying printed-text OCR…');
     const worker = await getWorker();
-    await worker.setParameters({tessedit_pageseg_mode: '11'});
-    const {data} = await worker.recognize(image);
+    const readings = await readPrintedSerials(worker, image);
     if (ticket !== session || cropTicket !== cropVersion || !stream || pending) return;
-    const readings = findSerials(data, image).filter(reading => !alreadyAdded(reading.code) && !confirmedReads.has(reading.code));
-    const nextReads = new Map(readings.map(reading => [reading.code, (previousReads.get(reading.code) || 0) + 1]));
-    const stable = readings.filter(reading => nextReads.get(reading.code) >= 2);
+    const available = readings.filter(reading => !alreadyAdded(reading.code) && !confirmedReads.has(reading.code));
+    const nextReads = new Map(available.map(reading => [reading.code, (previousReads.get(reading.code) || 0) + 1]));
+    const stable = available.filter(reading => nextReads.get(reading.code) >= 2);
     previousReads = nextReads;
-    if (capture || stable.length) freezeCamera(display, capture ? readings : stable);
-    else liveStatus(readings.length ? 'Text detected… hold steady.' : qrDiagnostics.unsupported ? 'QR read, but its serial format is unsupported. Try a close photo of the printed text.' : 'QR is not readable yet. Keep one whole QR in the guide; avoid glare and wait for focus.');
+    if (capture || stable.length) freezeCamera(display, capture ? available : stable);
+    else liveStatus(available.length ? 'Text detected… hold steady.' : qrDiagnostics.unsupported ? 'QR read, but its serial format is unsupported. Try a close photo of the printed text.' : 'QR is not readable yet. Keep one whole QR in the guide; avoid glare and wait for focus.');
   } catch {
     if (ticket === session && stream) liveStatus('Text fallback failed to load or read. QR scanning will keep trying; you can also take a close photo.');
   } finally {
@@ -527,15 +560,13 @@ $('#scan').onclick = async () => {
     }
     $('#status').textContent = 'No supported QR found. Trying printed text…';
     const image = frame.image, worker = await getWorker();
-    await worker.setParameters({tessedit_pageseg_mode: cropped ? '7' : '11'});
-    const {data} = await worker.recognize(image);
+    const readings = await readPrintedSerials(worker, image, cropped);
     if (ticket !== session || cropTicket !== cropVersion) return;
-    const readings = findSerials(data, image, cropped);
     detected = readings.filter(reading => !alreadyAdded(reading.code) && !confirmedReads.has(reading.code)); renderDetections();
     if (readings.length && !detected.length) { toast('All detected serials are already in your list'); return; }
     if (detected.length) { liveStatus('Text found. Tap a serial to select it.'); $('#textTray').scrollIntoView({behavior:'smooth', block:'nearest'}); }
     else if (cropped) {
-      const code = extractCode(data.text); if (code) showConfirmation(code, 'photo'); else toast('No clear text found — adjust the crop');
+      toast('No clear text found — adjust the crop');
     } else toast('No clear serial found — rotate, move closer, or use precision crop');
   } catch { toast('Scan failed — check your connection and try again'); }
   finally { busy = false; $('#progress').style.display = 'none'; syncControls(); }
