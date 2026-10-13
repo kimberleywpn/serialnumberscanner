@@ -87,8 +87,9 @@ function showConfirmation(code, origin) {
   const reading = detected.find(item => item.code === code);
   pending = {code, origin, method:reading?.method || 'ocr', inferred:Boolean(reading?.inferred)};
   $('#confirmTitle').textContent = 'Confirm serial';
-  $('#readingNote').textContent = pending.method === 'qr'
-    ? 'Read directly from QR data. Check before adding.' : 'Read from printed text. Check before adding.';
+  $('#readingNote').textContent = pending.inferred
+    ? 'QR-based estimate. Compare it with the printed serial before adding.'
+    : pending.method === 'qr' ? 'Read directly from QR data. Check before adding.' : 'Read from printed text. Check before adding.';
   $('#detectedCode').value = code;
   $('#last').style.display = 'none';
   validateConfirmation();
@@ -189,7 +190,7 @@ function renderDetections() {
   for (const reading of available) {
     const choose = () => showConfirmation(reading.code, stream ? 'live' : 'photo');
     const button = document.createElement('button');
-    button.type = 'button'; button.className = 'serial-choice'; button.textContent = reading.code + (reading.method === 'qr' ? ' · QR' : '');
+    button.type = 'button'; button.className = 'serial-choice'; button.textContent = reading.code + (reading.inferred ? ' · QR estimate' : reading.method === 'qr' ? ' · QR' : '');
     button.setAttribute('aria-label', `Select serial ${reading.code}`); button.onclick = choose;
     $('#detectedChoices').append(button);
     if (reading.bounds) {
@@ -551,8 +552,9 @@ $('#scan').onclick = async () => {
     let qrReadings = [];
     if (!cropped) qrReadings = await readQR(frame.display,true,ticket);
     if (ticket !== session || cropTicket !== cropVersion) return;
-    if (qrReadings.length) {
-      detected = qrReadings.filter(reading=>!alreadyAdded(reading.code) && !confirmedReads.has(reading.code)); renderDetections();
+    const directQR = qrReadings.filter(reading => !reading.inferred);
+    if (directQR.length) {
+      detected = directQR.filter(reading=>!alreadyAdded(reading.code) && !confirmedReads.has(reading.code)); renderDetections();
       liveStatus(detected.length ? `${detected.length} serial${detected.length === 1 ? '' : 's'} read from QR data. Check against the printed labels.` : 'All decoded QR serials are already in your list.');
       if (detected.length) $('#textTray').scrollIntoView({behavior:'smooth',block:'nearest'});
       else toast('All decoded QR serials are already in your list');
@@ -562,9 +564,10 @@ $('#scan').onclick = async () => {
     const image = frame.image, worker = await getWorker();
     const readings = await readPrintedSerials(worker, image, cropped);
     if (ticket !== session || cropTicket !== cropVersion) return;
-    detected = readings.filter(reading => !alreadyAdded(reading.code) && !confirmedReads.has(reading.code)); renderDetections();
-    if (readings.length && !detected.length) { toast('All detected serials are already in your list'); return; }
-    if (detected.length) { liveStatus('Text found. Tap a serial to select it.'); $('#textTray').scrollIntoView({behavior:'smooth', block:'nearest'}); }
+    const combined = [...readings, ...qrReadings.filter(reading => reading.inferred)];
+    detected = [...new Map(combined.map(reading => [reading.code, reading])).values()].filter(reading => !alreadyAdded(reading.code) && !confirmedReads.has(reading.code)); renderDetections();
+    if (combined.length && !detected.length) { toast('All detected serials are already in your list'); return; }
+    if (detected.length) { liveStatus(readings.length ? 'Printed text found. QR estimate is also available for comparison.' : 'QR estimate found. Check it against the printed serial.'); $('#textTray').scrollIntoView({behavior:'smooth', block:'nearest'}); }
     else if (cropped) {
       toast('No clear text found — adjust the crop');
     } else toast('No clear serial found — rotate, move closer, or use precision crop');
