@@ -177,7 +177,36 @@
     const p = entry.product;
     const codes = entry.serials.map(serial => serial.code).join('\n');
     card.innerHTML = `<h3>${escape(p.brand)} | ${escape(p.model)} | ${escape(p.viscosity)} | ${escape(entry.litres)}</h3><p>Serial numbers</p><div class="saved-codes">${escape(codes)}</div>`;
+    if (user?.role !== 'viewer') {
+      const edit = document.createElement('button'); edit.type = 'button'; edit.className = 'mini'; edit.textContent = 'Edit submission';
+      edit.onclick = () => editSubmission(entry, card, edit);
+      card.append(edit);
+    }
     el('savedResults').append(card);
+  }
+  function editSubmission(entry, card, button) {
+    button.disabled = true;
+    const form = document.createElement('form'); form.className = 'history-editor';
+    const options = products.map(p => `<option value="${escape(p.id)}">${escape(p.brand)} | ${escape(p.model)} | ${escape(gradeLabel(p.viscosity))} | ${escape(typeLabel(p.oil_type))}</option>`).join('');
+    form.innerHTML = `<label>Product<select name="product" required>${options}</select></label><label>Litres<select name="litres">${['1L','3.5L','4L','5L','18L'].map(v=>`<option>${v}</option>`).join('')}</select></label><label>Dealer name<input name="dealer" maxlength="120" required></label><label>Batch<input name="batch" maxlength="120" required></label><label>Serial numbers — one per line<textarea name="serials" rows="6" required autocapitalize="characters" spellcheck="false"></textarea></label><div class="confirm-actions"><button type="submit" class="btn btn-main">Save changes</button><button type="button" class="btn btn-soft" name="cancel">Cancel</button></div><p class="form-status" role="status"></p>`;
+    const fields = form.elements;
+    fields.product.value = entry.product_id; fields.litres.value = entry.litres;
+    fields.dealer.value = entry.dealer; fields.batch.value = entry.batch;
+    fields.serials.value = entry.serials.map(s=>s.code).join('\n');
+    const message = form.querySelector('[role="status"]');
+    fields.cancel.onclick = () => { form.remove(); button.disabled = false; };
+    form.onsubmit = async event => {
+      event.preventDefault();
+      const serials = fields.serials.value.split(/\r?\n/).map(s=>s.trim().toUpperCase()).filter(Boolean);
+      if (!serials.length || serials.length > 500 || serials.some(s=>!/^([A-Z]{3})\d{6,10}$/.test(s)) || new Set(serials).size !== serials.length) {
+        message.textContent = 'Enter unique serials, one per line: three letters followed by 6–10 digits.'; return;
+      }
+      const body = {request_id:crypto.randomUUID(),revision:entry.revision,product_id:fields.product.value,litres:fields.litres.value,dealer:fields.dealer.value.trim(),batch:fields.batch.value.trim(),serials:serials.map(code=>({code,method:'manual',edited:true}))};
+      [...fields].forEach(field=>field.disabled=true); message.textContent='Saving changes…';
+      try { await api(`/api/submissions/${entry.id}/edit`,body); form.remove(); await loadHistory(); }
+      catch(error) { message.textContent=error.message; [...fields].forEach(field=>field.disabled=false); }
+    };
+    card.append(form);
   }
   async function loadHistory(append = false) {
     if (!user || (append && (historyBusy || !nextBefore))) return;
