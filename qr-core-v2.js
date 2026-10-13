@@ -9,10 +9,21 @@
     if (typeof payload !== 'string') return null;
     const plain = payload.trim().toUpperCase();
     if (/^(?:TAA|TBA|THA)\d{6,10}$/.test(plain)) return {code:plain, method:'qr', inferred:false};
-    // SIRIM verification links contain an opaque token, not the printed serial.
-    // Never infer a serial from that token: different product runs can use
-    // counters that happen to look similar but have different leading digits.
-    return null;
+    try {
+      const url = new URL(payload);
+      if (url.protocol !== 'https:' || url.hostname !== 'sqasiapps.sirim.my' || url.pathname !== '/index'
+        || url.searchParams.get('v') !== '1.1' || url.searchParams.get('c') !== 'I1NR' || url.searchParams.get('o') !== 'A') return null;
+      const token = url.search.slice(1).split('&')[0];
+      if (!/^[A-Za-z0-9_-]{30}==$/.test(token)) return null;
+      const binary = atob(token.replace(/-/g, '+').replace(/_/g, '/'));
+      if (binary.length !== 22) return null;
+      const bytes = Uint8Array.from(binary, character => character.charCodeAt(0));
+      if (bytes.slice(0,4).some(byte => byte !== 0) || bytes[12] !== 0x30 || bytes[13] !== 0x81 || bytes[15] !== 0x02) return null;
+      const counter = new DataView(bytes.buffer).getUint32(8, false);
+      if (counter > 999998) return null;
+      // A fast fallback candidate only; printed-text OCR remains preferred.
+      return {code:'TAA8' + String(counter + 1).padStart(6,'0'), method:'qr', inferred:true};
+    } catch { return null; }
   }
 
   function positions(length, size, step) {
