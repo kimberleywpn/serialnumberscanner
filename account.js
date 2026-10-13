@@ -27,14 +27,14 @@
     status('submissionStatus', 'Drafts are held in memory. Submit before leaving or signing out.');
     sync();
   }
-  async function api(path, body) {
+  async function api(path, body, timeoutMs = 12000) {
     const headers = accessToken ? {'Authorization':`Bearer ${accessToken}`} : {};
     if (body !== undefined) Object.assign(headers, {'Content-Type':'application/json', 'X-Label-Lens-CSRF':csrf, 'X-Label-Lens-Origin':location.origin});
     let response;
     try {
       response = await fetch(API_BASE + path, {
         method: body === undefined ? 'GET' : 'POST', credentials:'omit', cache:'no-store', headers,
-        signal:AbortSignal.timeout(12000), ...(body === undefined ? {} : {body:JSON.stringify(body)})
+        signal:AbortSignal.timeout(timeoutMs), ...(body === undefined ? {} : {body:JSON.stringify(body)})
       });
     } catch (error) {
       throw new Error(error?.name === 'TimeoutError' ? 'The scanner server took too long to respond. Check that the scanner PC and VS Code tunnel are running.' : 'Cannot reach the scanner server. Check that the scanner PC and VS Code tunnel are running.');
@@ -118,7 +118,7 @@
   }
   el('loginForm').onsubmit = async event => {
     event.preventDefault(); el('signIn').disabled = true; status('loginStatus', 'Signing in…');
-    try { await enter(await api('/api/auth/login', {username:el('username').value.trim(), password:el('password').value})); }
+    try { await enter(await api('/api/auth/login', {username:el('username').value.trim(), password:el('password').value}, 30000)); }
     catch (error) { clearPrivate(); status('loginStatus', error.message, true); }
     finally { el('signIn').disabled = false; }
   };
