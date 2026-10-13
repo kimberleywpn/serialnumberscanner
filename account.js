@@ -155,6 +155,8 @@
   };
   el('submitBatch').onclick = async () => {
     if (!ready() || !draft.length) return;
+    const count = draft.length;
+    if (!confirm(`Submit ${count} serial${count === 1 ? '' : 's'} now?`)) return;
     const epoch = authEpoch;
     const payload = {product_id:product().id, litres:el('productLitres').value, dealer:el('dealerName').value.trim(), batch:el('batchName').value.trim(), serials:draft.map(item => ({code:item.code,method:item.method || 'manual',inferred:Boolean(item.inferred),edited:Boolean(item.edited)}))};
     const fingerprint = JSON.stringify(payload);
