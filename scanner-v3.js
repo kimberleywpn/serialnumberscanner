@@ -87,9 +87,8 @@ function showConfirmation(code, origin) {
   const reading = detected.find(item => item.code === code);
   pending = {code, origin, method:reading?.method || 'ocr', inferred:Boolean(reading?.inferred)};
   $('#confirmTitle').textContent = 'Confirm serial';
-  $('#readingNote').textContent = pending.inferred
-    ? 'QR-derived estimate for the sample TAA8 series. Check the printed serial. This is not a SIRIM authenticity check.'
-    : pending.method === 'qr' ? 'Read directly from QR data. Check before adding.' : 'Read from printed text. Check before adding.';
+  $('#readingNote').textContent = pending.method === 'qr'
+    ? 'Read directly from QR data. Check before adding.' : 'Read from printed text. Check before adding.';
   $('#detectedCode').value = code;
   $('#last').style.display = 'none';
   validateConfirmation();
