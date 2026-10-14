@@ -12,6 +12,7 @@ let frozen = false, detected = [], previousReads = new Map(), confirmedReads = n
 let qrPass = 0;
 let livePass = 0;
 let analysisPaused = false;
+let multiScan = false, multiReadings = [];
 let qrWorker = null, qrJob = 0, detectionFrame = null;
 const qrJobs = new Map();
 let successTimer = null;
@@ -81,6 +82,9 @@ function syncControls() {
   const canScan = LabelLensAccount.canScan();
   $('#liveButton').textContent = starting ? 'Cancel camera' : stream ? 'Stop camera' : 'Start live scan';
   $('#liveButton').disabled = !canScan && !stream && !starting || busy && !stream && !starting;
+  $('#multiToggle').textContent = multiScan ? 'Multi-scan: on' : 'Multi-scan: off';
+  $('#multiToggle').setAttribute('aria-pressed', String(multiScan));
+  $('#multiToggle').disabled = starting || frozen || Boolean(pending);
   $('#scan').hidden = Boolean(stream || starting || pending);
   $('#scan').disabled = !canScan || !source || busy;
   $('#left').disabled = $('#right').disabled = !source || busy || Boolean(stream) || starting;
@@ -199,15 +203,19 @@ $('#clearAll').onclick = () => {
 };
 
 function resetDetections() {
-  detected = []; detectionFrame = null; previousReads.clear(); frozen = false;
+  detected = []; multiReadings = []; detectionFrame = null; previousReads.clear(); frozen = false;
   clearTimeout(successTimer); $('#scanSuccess').classList.remove('show'); $('#scanSuccess').hidden = true;
   $('#textOverlay').replaceChildren(); $('#detectedChoices').replaceChildren(); $('#textTray').hidden = true;
+  $('#multiActions').hidden = true;
   frozenCanvas.style.display = 'none';
 }
 function renderDetections() {
   $('#textOverlay').replaceChildren(); $('#detectedChoices').replaceChildren();
   const available = detected.filter(reading => !alreadyAdded(reading.code) && !confirmedReads.has(reading.code));
   $('#textTray').hidden = !available.length;
+  $('#multiActions').hidden = !multiScan || !stream || !available.length;
+  $('#detectedHint').textContent = multiScan ? `${available.length} serial${available.length === 1 ? '' : 's'} ready. Continue scanning, then add all when ready.` : 'Tap a highlight or choose a serial below.';
+  $('#addDetected').textContent = `Add all (${available.length}) to draft`;
   for (const reading of available) {
     const choose = () => showConfirmation(reading.code, stream ? 'live' : 'photo');
     const button = document.createElement('button');
@@ -224,6 +232,36 @@ function renderDetections() {
     }
   }
 }
+function collectMulti(readings) {
+  const known = new Map(multiReadings.map(reading => [reading.code, reading]));
+  for (const reading of readings) {
+    if (!alreadyAdded(reading.code) && !confirmedReads.has(reading.code)) known.set(reading.code, reading);
+  }
+  multiReadings = [...known.values()].slice(0, Math.max(0, 500 - items.length));
+  detected = multiReadings;
+  renderDetections();
+}
+$('#multiToggle').onclick = () => {
+  if (starting || frozen || pending) return;
+  multiScan = !multiScan;
+  if (!multiScan) { multiReadings = []; detected = []; renderDetections(); toast('Multi-scan cleared'); }
+  else toast('Multi-scan is on — scan labels, then add all when ready');
+  syncControls();
+};
+$('#addDetected').onclick = () => {
+  if (!LabelLensAccount.canScan() || LabelLensAccount.saving()) return;
+  const readings = multiReadings.filter(reading => SERIAL_FORMAT.test(reading.code) && !alreadyAdded(reading.code));
+  if (!readings.length) return;
+  for (const reading of readings) {
+    if (items.length >= 500) break;
+    confirmedReads.add(reading.code);
+    items.push({code:reading.code, originalCode:reading.code, method:reading.method || 'ocr', inferred:Boolean(reading.inferred), edited:false, time:new Intl.DateTimeFormat(undefined, {hour:'numeric', minute:'2-digit'}).format(new Date())});
+  }
+  multiReadings = []; detected = []; save(); renderDetections();
+  toast(`${readings.length} serial${readings.length === 1 ? '' : 's'} added to draft`);
+  liveStatus('Added to draft. Continue scanning or submit when ready.');
+};
+$('#clearDetected').onclick = () => { multiReadings = []; detected = []; renderDetections(); toast('Multi-scan list cleared'); };
 function findSerials(data, frame, cropped = false) {
   const found = new Map();
   const collect = unit => {
@@ -613,6 +651,7 @@ async function scanLive(capture = false) {
     if (ticket !== session || cropTicket !== cropVersion || !stream || pending) return;
     if (qrReadings.length) {
       if(capture) freezeCamera(display,qrReadings);
+      else if(multiScan) { detectionFrame=display;collectMulti(qrReadings);showScanSuccess(qrReadings[0].code);setGuide('ready', 'Serial saved · point at the next label');liveStatus(`${multiReadings.length} serial${multiReadings.length === 1 ? '' : 's'} ready. Keep scanning or add all to draft.`); }
       else { analysisPaused=true;detectionFrame=display;detected=qrReadings;renderDetections();showScanSuccess(qrReadings[0].code);setGuide('ready', 'Good distance · hold still');liveStatus('Serial detected. Tap it to confirm, or scan the next label.'); }
       return;
     }
@@ -633,7 +672,7 @@ async function scanLive(capture = false) {
     const stable = available.filter(reading => nextReads.get(reading.code) >= 2);
     previousReads = nextReads;
     if (capture) freezeCamera(display,available);
-    else if(stable.length) { analysisPaused=true;detectionFrame=display;detected=stable;renderDetections();showScanSuccess(stable[0].code);setGuide('ready', 'Good distance · hold still');liveStatus('Serial detected. Tap it to confirm, or scan the next label.'); }
+    else if(stable.length) { if(multiScan) { detectionFrame=display;collectMulti(stable);showScanSuccess(stable[0].code);setGuide('ready', 'Serial saved · point at the next label');liveStatus(`${multiReadings.length} serial${multiReadings.length === 1 ? '' : 's'} ready. Keep scanning or add all to draft.`); } else { analysisPaused=true;detectionFrame=display;detected=stable;renderDetections();showScanSuccess(stable[0].code);setGuide('ready', 'Good distance · hold still');liveStatus('Serial detected. Tap it to confirm, or scan the next label.'); } }
     else { setGuide(available.length ? 'steady' : 'align', available.length ? 'Text seen · hold steady' : 'Fit one label inside · move closer if it looks small'); liveStatus(available.length ? 'Text detected… hold steady.' : qrDiagnostics.unsupported ? 'QR read, but its serial format is unsupported. Try a close photo of the printed text.' : 'QR is not readable yet. Keep one whole QR in the guide; avoid glare and wait for focus.'); }
   } catch {
     if (ticket === session && stream) liveStatus('Text fallback failed to load or read. QR scanning will keep trying; you can also take a close photo.');
