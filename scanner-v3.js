@@ -93,7 +93,6 @@ function validateConfirmation() {
   const duplicate = items.some((item, index) => index !== pending?.editIndex && normalizeCode(item.code) === code);
   const valid = SERIAL_FORMAT.test(code);
   $('#addCode').disabled = !LabelLensAccount.canScan() || !valid || duplicate || items.length >= 500;
-  $('#copyDetected').disabled = !code.length;
   $('#confirmError').textContent = duplicate ? 'This code is already in your draft.' : !valid ? 'Use 3 letters followed by 6–10 digits.' : items.length >= 500 ? 'Submit this draft before adding more serials.' : '';
   return code;
 }
@@ -165,7 +164,6 @@ $('#tryAgain').onclick = () => {
   clearConfirmation();
   if (stream) liveStatus('Tap another serial, or continue scanning.');
 };
-$('#copyDetected').onclick = () => { if (pending) copyText(normalizeCode($('#detectedCode').value), 'Text copied'); };
 $('#precisionMode').onchange = () => { resetDetections(); clearConfirmation(); syncControls(); cropChanged(); };
 
 async function copyText(text, message) {
