@@ -26,6 +26,12 @@ function liveStatus(text) {
   $('#liveState').textContent = text;
   $('#liveState').dataset.active = Boolean(stream).toString();
 }
+function setGuide(state = 'align', text = 'Fit one label inside this frame') {
+  const guide = $('#liveGuide');
+  if (!guide) return;
+  guide.dataset.state = state;
+  $('#liveGuideTip').textContent = text;
+}
 function showScanSuccess(code) {
   const notice = $('#scanSuccess');
   clearTimeout(successTimer);
@@ -329,6 +335,7 @@ async function resumeCamera() {
   try { await video.play(); }
   catch { if (ticket === session) stopCamera('Camera paused. Tap Start live scan to retry.'); return; }
   if (ticket !== session) return;
+  setGuide('align', 'Fit one label inside · fill most of the frame');
   liveStatus('Point at one QR code. Printed text is the fallback.'); syncControls(); scheduleLive(100);
 }
 $('#resumeScan').onclick = resumeCamera;
@@ -373,6 +380,7 @@ async function startCamera() {
   }
   const ticket = ++session;
   starting = true; lastConfirmedRead = ''; confirmedReads.clear(); resetDetections(); clearConfirmation(); $('#last').style.display = 'none';
+  setGuide('align', 'Fit one label inside · fill most of the frame');
   getWorker().catch(() => {});
   liveStatus('Allow camera access to start live scanning.'); syncControls();
   try {
@@ -395,6 +403,7 @@ async function startCamera() {
     requestAnimationFrame(() => { if (ticket === session) placeDefault(true); });
     stream.getTracks().forEach(track => track.addEventListener('ended', () => { if (ticket === session) stopCamera('Camera disconnected. Tap Start live scan to retry.'); }, {once: true}));
     qrPass = 0;
+    setGuide('align', 'Fit one label inside · fill most of the frame');
     liveStatus('Point at one QR code. Printed text is the fallback.');
     scheduleLive(200);
   } catch (error) {
@@ -597,13 +606,14 @@ async function scanLive(capture = false) {
     if (ticket !== session || cropTicket !== cropVersion || !stream || pending) return;
     if (qrReadings.length) {
       if(capture) freezeCamera(display,qrReadings);
-      else { detectionFrame=display;detected=qrReadings;renderDetections();showScanSuccess(qrReadings[0].code);liveStatus('Serial detected. Tap it to confirm, or point at another label.'); }
+      else { detectionFrame=display;detected=qrReadings;renderDetections();showScanSuccess(qrReadings[0].code);setGuide('ready', 'Good distance · hold still');liveStatus('Serial detected. Tap it to confirm, or point at another label.'); }
       return;
     }
     if(combinedQR.length) {liveStatus('QR read — this serial is already in your list. Point at a different label.');return;}
     if(!qrDiagnostics.available) {liveStatus('QR decoder did not load. Refresh this page while online.');return;}
     // Give QR tiles a chance to cover the view before loading the larger OCR engine.
     if (!capture && qrPass % 3 !== 0 && typeof window.jsQR === 'function') {
+      setGuide('align', 'Keep one label inside · move closer if it looks small');
       liveStatus(qrDiagnostics.unsupported ? 'QR read, but this format is not supported. Trying printed text next.' : 'Centre one QR in the yellow guide. Move closer, then hold still for focus.'); return;
     }
     liveStatus('No supported QR found. Trying printed-text OCR…');
@@ -615,8 +625,8 @@ async function scanLive(capture = false) {
     const stable = available.filter(reading => nextReads.get(reading.code) >= 2);
     previousReads = nextReads;
     if (capture) freezeCamera(display,available);
-    else if(stable.length) { detectionFrame=display;detected=stable;renderDetections();showScanSuccess(stable[0].code);liveStatus('Serial detected. Tap it to confirm.'); }
-    else liveStatus(available.length ? 'Text detected… hold steady.' : qrDiagnostics.unsupported ? 'QR read, but its serial format is unsupported. Try a close photo of the printed text.' : 'QR is not readable yet. Keep one whole QR in the guide; avoid glare and wait for focus.');
+    else if(stable.length) { detectionFrame=display;detected=stable;renderDetections();showScanSuccess(stable[0].code);setGuide('ready', 'Good distance · hold still');liveStatus('Serial detected. Tap it to confirm.'); }
+    else { setGuide(available.length ? 'steady' : 'align', available.length ? 'Text seen · hold steady' : 'Fit one label inside · move closer if it looks small'); liveStatus(available.length ? 'Text detected… hold steady.' : qrDiagnostics.unsupported ? 'QR read, but its serial format is unsupported. Try a close photo of the printed text.' : 'QR is not readable yet. Keep one whole QR in the guide; avoid glare and wait for focus.'); }
   } catch {
     if (ticket === session && stream) liveStatus('Text fallback failed to load or read. QR scanning will keep trying; you can also take a close photo.');
   } finally {
