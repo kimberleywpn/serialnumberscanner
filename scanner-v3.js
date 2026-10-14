@@ -173,10 +173,22 @@ $('#confirmForm').addEventListener('submit', event => {
 });
 $('#tryAgain').onclick = () => {
   if (!pending) return;
-  skippedCode = pending.code;
+  const removedCode = pending.code;
+  skippedCode = removedCode;
   skipUntil = Date.now() + 3500;
+  detected = detected.filter(reading => reading.code !== removedCode);
+  if (multiScan) multiReadings = multiReadings.filter(reading => reading.code !== removedCode);
   clearConfirmation();
-  if (stream) liveStatus('Tap another serial, or continue scanning.');
+  if (!stream) return;
+  if (frozen) {
+    frozen = false; frozenCanvas.style.display = 'none'; video.style.display = 'block';
+    video.play().then(() => {
+      if (!stream) return;
+      renderDetections(); setGuide('align', multiScan ? 'Point at the next label' : 'Fit one label inside · fill most of the frame');
+      liveStatus(multiScan ? `${multiReadings.length} serial${multiReadings.length === 1 ? '' : 's'} ready. Keep scanning.` : 'Deleted. Point at another label.');
+      syncControls(); scheduleLive(100);
+    }).catch(() => stopCamera('Camera paused. Tap Start live scan to retry.'));
+  } else { renderDetections(); liveStatus('Detected serial deleted.'); }
 };
 $('#precisionMode').onchange = () => { resetDetections(); clearConfirmation(); syncControls(); cropChanged(); };
 
