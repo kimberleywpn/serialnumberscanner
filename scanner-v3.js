@@ -10,6 +10,8 @@ let lastCandidate = '', candidateReads = 0, skippedCode = '', skipUntil = 0, las
 const frozenCanvas = $('#freezeFrame');
 let frozen = false, detected = [], previousReads = new Map(), confirmedReads = new Set();
 let qrPass = 0;
+let qrWorker = null, qrJob = 0, detectionFrame = null;
+const qrJobs = new Map();
 let qrDiagnostics = {available:false,decoded:0,unsupported:0}, torchOn=false;
 
 // Authenticated drafts never load device-wide localStorage history.
@@ -84,6 +86,7 @@ function validateConfirmation() {
   return code;
 }
 function showConfirmation(code, origin) {
+  if (stream && !frozen && detectionFrame) freezeCamera(detectionFrame,detected);
   const reading = detected.find(item => item.code === code);
   pending = {code, origin, method:reading?.method || 'ocr', inferred:Boolean(reading?.inferred)};
   $('#confirmTitle').textContent = 'Confirm serial';
@@ -179,7 +182,7 @@ $('#clearAll').onclick = () => {
 };
 
 function resetDetections() {
-  detected = []; previousReads.clear(); frozen = false;
+  detected = []; detectionFrame = null; previousReads.clear(); frozen = false;
   $('#textOverlay').replaceChildren(); $('#detectedChoices').replaceChildren(); $('#textTray').hidden = true;
   frozenCanvas.style.display = 'none';
 }
@@ -193,7 +196,7 @@ function renderDetections() {
     button.type = 'button'; button.className = 'serial-choice'; button.textContent = reading.code + (reading.inferred ? ' · QR estimate' : reading.method === 'hybrid' ? ' · Text + QR' : reading.method === 'qr' ? ' · QR' : '');
     button.setAttribute('aria-label', `Select serial ${reading.code}`); button.onclick = choose;
     $('#detectedChoices').append(button);
-    if (reading.bounds) {
+    if (reading.bounds && (!stream || frozen)) {
       const highlight = document.createElement('button');
       highlight.type = 'button'; highlight.className = 'text-highlight' + (pending?.code === reading.code ? ' selected' : '');
       highlight.setAttribute('aria-label', `Highlighted serial ${reading.code}`); highlight.title = reading.code;
@@ -516,14 +519,42 @@ function getWorker() {
   })().catch(error => { workerPromise = null; throw error; });
   return workerPromise;
 }
-function scheduleLive(delay = 900) {
+function scheduleLive(delay = 200) {
   clearTimeout(loopTimer);
   if (stream && !pending && !starting && !frozen) loopTimer = setTimeout(scanLive, delay);
 }
 async function readQR(frame, exhaustive, ticket) {
   qrDiagnostics={available:Boolean(window.LabelQR && typeof window.jsQR==='function'),decoded:0,unsupported:0};
   if (!qrDiagnostics.available) return [];
-  const image = frame.getContext('2d', {willReadFrequently:true}).getImageData(0,0,frame.width,frame.height);
+  let image = frame.getContext('2d', {willReadFrequently:true}).getImageData(0,0,frame.width,frame.height);
+  if (typeof Worker === 'function') {
+    try {
+      if (!qrWorker) {
+        qrWorker = new Worker('qr-worker.js?v=3.21');
+        qrWorker.onmessage = ({data}) => {
+          const job=qrJobs.get(data.id);if(!job)return;
+          qrJobs.delete(data.id);clearTimeout(job.timer);
+          data.error ? job.reject(new Error(data.error)) : job.resolve(data);
+        };
+        qrWorker.onerror = () => {
+          qrWorker?.terminate();qrWorker=null;
+          for(const job of qrJobs.values()){clearTimeout(job.timer);job.reject(new Error('QR worker unavailable'));}qrJobs.clear();
+        };
+      }
+      const result = await new Promise((resolve,reject)=>{
+        const id=++qrJob;
+        const timer=setTimeout(()=>{qrJobs.delete(id);reject(new Error('QR scan timed out'));},30000);
+        qrJobs.set(id,{resolve,reject,timer});
+        qrWorker.postMessage({id,buffer:image.data.buffer,width:image.width,height:image.height,exhaustive,pass:qrPass++,excluded:[...items.map(item=>item.code),...confirmedReads]},[image.data.buffer]);
+      });
+      if(ticket!==session)return [];
+      qrDiagnostics=result.diagnostics;return result.readings;
+    } catch {
+      if(ticket!==session)return [];
+      // Reacquire pixels after transfer if this browser cannot run the worker.
+      image = frame.getContext('2d').getImageData(0,0,frame.width,frame.height);
+    }
+  }
   return LabelQR.scanFrame(image,jsQR,{
     exhaustive, pass:qrPass++, cancelled:()=>ticket !== session,
     onDecode:({supported})=>{qrDiagnostics.decoded++;if(!supported) qrDiagnostics.unsupported++;},
@@ -555,7 +586,11 @@ async function scanLive(capture = false) {
     const combinedQR = await readHybridSerials(display,rawReadings,ticket);
     const qrReadings = combinedQR.filter(reading=>!alreadyAdded(reading.code) && !confirmedReads.has(reading.code));
     if (ticket !== session || cropTicket !== cropVersion || !stream || pending) return;
-    if (qrReadings.length) { freezeCamera(display,qrReadings); return; }
+    if (qrReadings.length) {
+      if(capture) freezeCamera(display,qrReadings);
+      else { detectionFrame=display;detected=qrReadings;renderDetections();liveStatus('Serial detected. Tap it to confirm, or point at another label.'); }
+      return;
+    }
     if(combinedQR.length) {liveStatus('QR read — this serial is already in your list. Point at a different label.');return;}
     if(!qrDiagnostics.available) {liveStatus('QR decoder did not load. Refresh this page while online.');return;}
     // Give QR tiles a chance to cover the view before loading the larger OCR engine.
@@ -570,7 +605,8 @@ async function scanLive(capture = false) {
     const nextReads = new Map(available.map(reading => [reading.code, (previousReads.get(reading.code) || 0) + 1]));
     const stable = available.filter(reading => nextReads.get(reading.code) >= 2);
     previousReads = nextReads;
-    if (capture || stable.length) freezeCamera(display, capture ? available : stable);
+    if (capture) freezeCamera(display,available);
+    else if(stable.length) { detectionFrame=display;detected=stable;renderDetections();liveStatus('Serial detected. Tap it to confirm.'); }
     else liveStatus(available.length ? 'Text detected… hold steady.' : qrDiagnostics.unsupported ? 'QR read, but its serial format is unsupported. Try a close photo of the printed text.' : 'QR is not readable yet. Keep one whole QR in the guide; avoid glare and wait for focus.');
   } catch {
     if (ticket === session && stream) liveStatus('Text fallback failed to load or read. QR scanning will keep trying; you can also take a close photo.');
@@ -614,6 +650,8 @@ $('#scan').onclick = async () => {
 };
 document.addEventListener('visibilitychange', () => { if (document.hidden && (stream || starting)) stopCamera('Camera paused. Tap Start live scan when you return.'); });
 window.addEventListener('pagehide', () => {
+  qrWorker?.terminate();qrWorker=null;
+  for(const job of qrJobs.values()){clearTimeout(job.timer);job.reject(new Error('Scanner closed'));}qrJobs.clear();
   stopCamera('Camera stopped.');
   workerPromise?.then(worker => worker.terminate()).catch(() => {}); workerPromise = null;
 });
