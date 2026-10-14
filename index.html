@@ -12,7 +12,7 @@
   <script src="account.js?v=3.22" defer></script>
   <script src="jsqr-1.4.0.js?v=3.4" defer></script>
   <script src="qr-core-v2.js?v=3.20" defer></script>
-  <script src="scanner-v3.js?v=3.23" defer></script>
+  <script src="scanner-v3.js?v=3.24" defer></script>
   <style>
     :root{--ink:#101a16;--paper:#f3f7f3;--card:#fff;--muted:#64716a;--line:#dce5dd;--mint:#8ee6a8;--mint-dark:#145d31;--orange:#ffb45e;--danger:#a63d35;--shadow:0 18px 45px rgba(16,26,22,.11)}
     *{box-sizing:border-box}html{font-family:Inter,ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;background:var(--paper);color:var(--ink)}body{margin:0;min-height:100vh;background:radial-gradient(circle at 10% 0,rgba(142,230,168,.19),transparent 25rem),var(--paper)}button,input{font:inherit}button{cursor:pointer}.shell{max-width:1080px;margin:auto;padding:0 12px calc(92px + env(safe-area-inset-bottom))}
@@ -96,7 +96,7 @@
         <section class="confirmation" id="confirmation" aria-labelledby="confirmTitle" hidden>
           <h2 id="confirmTitle">Confirm serial</h2><p id="readingNote">Check the reading. You can correct it before adding.</p>
           <form id="confirmForm"><label for="detectedCode">Detected serial</label><input id="detectedCode" class="detected-input" autocomplete="off" autocapitalize="characters" spellcheck="false" maxlength="40" required />
-          <div class="confirm-error" id="confirmError" role="status"></div><div class="confirm-actions"><button id="addCode" type="submit" class="btn btn-main">Add to list</button><button id="tryAgain" type="button" class="btn btn-soft">Cancel</button></div><button id="copyDetected" type="button" class="btn btn-soft copy-selection">Copy text</button></form>
+          <div class="confirm-error" id="confirmError" role="status"></div><div class="confirm-actions"><button id="addCode" type="submit" class="btn btn-main">Add to list</button><button id="tryAgain" type="button" class="btn btn-soft">Cancel</button></div></form>
         </section>
         <div class="progress" id="progress"><div class="progress-head"><span id="status">Preparing…</span><span id="pct">0%</span></div><div class="track"><div class="bar" id="bar"></div></div></div>
         <div class="last" id="last" role="status"><div class="last-label">Added to list</div><div class="last-code" id="lastCode"></div></div>
