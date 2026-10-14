@@ -112,7 +112,7 @@ function showConfirmation(code, origin) {
   $('#confirmTitle').textContent = 'Confirm serial';
   $('#readingNote').textContent = pending.inferred
     ? 'QR-based estimate. Compare it with the printed serial before adding.'
-    : pending.method === 'qr' ? 'Read directly from QR data. Check before adding.' : pending.method === 'hybrid' ? 'Front read from printed text; last six digits read from QR. Check before adding.' : 'Read from printed text. Check before adding.';
+    : pending.method === 'qr' ? 'Read directly from QR data. Check before adding.' : pending.method === 'hybrid' ? 'Check the serial before adding.' : 'Read from printed text. Check before adding.';
   $('#detectedCode').value = code;
   $('#last').style.display = 'none';
   validateConfirmation();
