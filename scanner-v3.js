@@ -10,6 +10,7 @@ let lastCandidate = '', candidateReads = 0, skippedCode = '', skipUntil = 0, las
 const frozenCanvas = $('#freezeFrame');
 let frozen = false, detected = [], previousReads = new Map(), confirmedReads = new Set();
 let qrPass = 0;
+let livePass = 0;
 let qrWorker = null, qrJob = 0, detectionFrame = null;
 const qrJobs = new Map();
 let successTimer = null;
@@ -275,7 +276,8 @@ function wholeFrame() {
   const input = stream ? video : canvas;
   const width = stream ? video.videoWidth : canvas.width, height = stream ? video.videoHeight : canvas.height;
   if (!width || !height) throw new Error('No camera frame');
-  const scale = Math.min(1.5, 1920 / Math.max(width, height));
+  // Never enlarge a phone frame; scanning fewer pixels keeps the live loop responsive.
+  const scale = Math.min(1, 1280 / Math.max(width, height));
   const display = document.createElement('canvas'); display.width = Math.round(width * scale); display.height = Math.round(height * scale);
   display.getContext('2d').drawImage(input, 0, 0, display.width, display.height);
   const image = document.createElement('canvas'); image.width = display.width; image.height = display.height;
@@ -285,8 +287,8 @@ function wholeFrame() {
 function centreCameraFrame() {
   // Read native camera pixels before whole-frame downsampling. The guide matches this crop.
   const width=video.videoWidth,height=video.videoHeight;
-  const x=Math.round(width*.2),y=Math.round(height*.2),w=Math.round(width*.6),h=Math.round(height*.6);
-  const frame=document.createElement('canvas'),scale=Math.min(2,1600/Math.max(w,h));
+  const x=Math.round(width*.1),y=Math.round(height*.2),w=Math.round(width*.8),h=Math.round(height*.58);
+  const frame=document.createElement('canvas'),scale=Math.min(1,1200/Math.max(w,h));
   frame.width=Math.max(1,Math.round(w*scale));frame.height=Math.max(1,Math.round(h*scale));
   frame.getContext('2d').drawImage(video,x,y,w,h,0,0,frame.width,frame.height);
   return {frame,bounds:{left:x/width,top:y/height,width:w/width,height:h/height}};
@@ -402,7 +404,7 @@ async function startCamera() {
     starting = false; syncControls();
     requestAnimationFrame(() => { if (ticket === session) placeDefault(true); });
     stream.getTracks().forEach(track => track.addEventListener('ended', () => { if (ticket === session) stopCamera('Camera disconnected. Tap Start live scan to retry.'); }, {once: true}));
-    qrPass = 0;
+  qrPass = 0; livePass = 0;
     setGuide('align', 'Fit one label inside · fill most of the frame');
     liveStatus('Point at one QR code. Printed text is the fallback.');
     scheduleLive(200);
@@ -588,20 +590,23 @@ async function scanLive(capture = false) {
   if (!stream || pending || starting || frozen) return;
   if (busy || drag || resizing || document.hidden) { scheduleLive(); return; }
   const ticket = session, cropTicket = cropVersion;
-  busy = true;
+  busy = true; livePass++;
   syncControls();
   try {
-    const {image, display} = wholeFrame();
     const centre=centreCameraFrame();
-    let rawReadings=await readQR(centre.frame,false,ticket);
+    let display=centre.frame, image=null, rawReadings=await readQR(centre.frame,false,ticket);
     const centreDiagnostics={...qrDiagnostics};
-    rawReadings=rawReadings.map(reading=>({...reading,corners:reading.corners?.map(p=>({x:centre.bounds.left+p.x*centre.bounds.width,y:centre.bounds.top+p.y*centre.bounds.height})),bounds:{left:centre.bounds.left+reading.bounds.left*centre.bounds.width,top:centre.bounds.top+reading.bounds.top*centre.bounds.height,width:reading.bounds.width*centre.bounds.width,height:reading.bounds.height*centre.bounds.height}}));
-    if(!rawReadings.some(reading=>!alreadyAdded(reading.code) && !confirmedReads.has(reading.code))) {
+    const hasDirectCentre=rawReadings.some(reading=>!reading.inferred && !alreadyAdded(reading.code) && !confirmedReads.has(reading.code));
+    const needsHybrid=rawReadings.some(reading=>reading.inferred && reading.suffix && reading.bounds);
+    const inspectFullFrame=capture || needsHybrid || (!hasDirectCentre && livePass % 4 === 0);
+    if(inspectFullFrame) {
+      const full=wholeFrame(); image=full.image; display=full.display;
+      const centreReadings=rawReadings.map(reading=>({...reading,corners:reading.corners?.map(p=>({x:centre.bounds.left+p.x*centre.bounds.width,y:centre.bounds.top+p.y*centre.bounds.height})),bounds:{left:centre.bounds.left+reading.bounds.left*centre.bounds.width,top:centre.bounds.top+reading.bounds.top*centre.bounds.height,width:reading.bounds.width*centre.bounds.width,height:reading.bounds.height*centre.bounds.height}}));
       const fullReadings=await readQR(display,Boolean(capture),ticket);
-      rawReadings=[...new Map([...rawReadings,...fullReadings].map(reading=>[reading.code,reading])).values()];
+      rawReadings=[...new Map([...centreReadings,...fullReadings].map(reading=>[reading.code,reading])).values()];
       qrDiagnostics.decoded+=centreDiagnostics.decoded;qrDiagnostics.unsupported+=centreDiagnostics.unsupported;
     }
-    const combinedQR = await readHybridSerials(display,rawReadings,ticket);
+    const combinedQR = needsHybrid ? await readHybridSerials(display,rawReadings,ticket) : rawReadings;
     const qrReadings = combinedQR.filter(reading=>!alreadyAdded(reading.code) && !confirmedReads.has(reading.code));
     if (ticket !== session || cropTicket !== cropVersion || !stream || pending) return;
     if (qrReadings.length) {
@@ -611,12 +616,13 @@ async function scanLive(capture = false) {
     }
     if(combinedQR.length) {liveStatus('QR read — this serial is already in your list. Point at a different label.');return;}
     if(!qrDiagnostics.available) {liveStatus('QR decoder did not load. Refresh this page while online.');return;}
-    // Give QR tiles a chance to cover the view before loading the larger OCR engine.
-    if (!capture && qrPass % 3 !== 0 && typeof window.jsQR === 'function') {
+    // OCR is the expensive fallback. Keep QR responsive and run text OCR periodically.
+    if (!capture && livePass % 5 !== 0 && typeof window.jsQR === 'function') {
       setGuide('align', 'Keep one label inside · move closer if it looks small');
       liveStatus(qrDiagnostics.unsupported ? 'QR read, but this format is not supported. Trying printed text next.' : 'Centre one QR in the yellow guide. Move closer, then hold still for focus.'); return;
     }
     liveStatus('No supported QR found. Trying printed-text OCR…');
+    if (!image) { const full=wholeFrame(); image=full.image; display=full.display; }
     const worker = await getWorker();
     const readings = await readPrintedSerials(worker, image);
     if (ticket !== session || cropTicket !== cropVersion || !stream || pending) return;
