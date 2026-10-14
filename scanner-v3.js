@@ -13,6 +13,7 @@ let qrPass = 0;
 let livePass = 0;
 let analysisPaused = false;
 let multiScan = false, multiReadings = [];
+let multiCooldownUntil = 0;
 let qrWorker = null, qrJob = 0, detectionFrame = null;
 const qrJobs = new Map();
 let successTimer = null;
@@ -203,7 +204,7 @@ $('#clearAll').onclick = () => {
 };
 
 function resetDetections() {
-  detected = []; multiReadings = []; detectionFrame = null; previousReads.clear(); frozen = false;
+  detected = []; multiReadings = []; multiCooldownUntil = 0; detectionFrame = null; previousReads.clear(); frozen = false;
   clearTimeout(successTimer); $('#scanSuccess').classList.remove('show'); $('#scanSuccess').hidden = true;
   $('#textOverlay').replaceChildren(); $('#detectedChoices').replaceChildren(); $('#textTray').hidden = true;
   $('#multiActions').hidden = true;
@@ -234,16 +235,20 @@ function renderDetections() {
 }
 function collectMulti(readings) {
   const known = new Map(multiReadings.map(reading => [reading.code, reading]));
+  const before = known.size;
   for (const reading of readings) {
     if (!alreadyAdded(reading.code) && !confirmedReads.has(reading.code)) known.set(reading.code, reading);
   }
   multiReadings = [...known.values()].slice(0, Math.max(0, 500 - items.length));
   detected = multiReadings;
-  renderDetections();
+  const added = multiReadings.length > before;
+  if (added) renderDetections();
+  return added;
 }
 $('#multiToggle').onclick = () => {
   if (starting || frozen || pending) return;
   multiScan = !multiScan;
+  multiCooldownUntil = 0;
   if (!multiScan) { multiReadings = []; detected = []; renderDetections(); toast('Multi-scan cleared'); }
   else toast('Multi-scan is on — scan labels, then add all when ready');
   syncControls();
@@ -257,11 +262,11 @@ $('#addDetected').onclick = () => {
     confirmedReads.add(reading.code);
     items.push({code:reading.code, originalCode:reading.code, method:reading.method || 'ocr', inferred:Boolean(reading.inferred), edited:false, time:new Intl.DateTimeFormat(undefined, {hour:'numeric', minute:'2-digit'}).format(new Date())});
   }
-  multiReadings = []; detected = []; save(); renderDetections();
+  multiCooldownUntil = 0; multiReadings = []; detected = []; save(); renderDetections();
   toast(`${readings.length} serial${readings.length === 1 ? '' : 's'} added to draft`);
   liveStatus('Added to draft. Continue scanning or submit when ready.');
 };
-$('#clearDetected').onclick = () => { multiReadings = []; detected = []; renderDetections(); toast('Multi-scan list cleared'); };
+$('#clearDetected').onclick = () => { multiCooldownUntil = 0; multiReadings = []; detected = []; renderDetections(); toast('Multi-scan list cleared'); };
 function findSerials(data, frame, cropped = false) {
   const found = new Map();
   const collect = unit => {
@@ -581,7 +586,8 @@ function getWorker() {
 }
 function scheduleLive(delay = 250) {
   clearTimeout(loopTimer);
-  if (stream && !pending && !starting && !frozen && !analysisPaused) loopTimer = setTimeout(scanLive, delay);
+  const cooldown = multiScan ? Math.max(0, multiCooldownUntil - Date.now()) : 0;
+  if (stream && !pending && !starting && !frozen && !analysisPaused) loopTimer = setTimeout(scanLive, Math.max(delay, cooldown));
 }
 async function readQR(frame, exhaustive, ticket) {
   qrDiagnostics={available:Boolean(window.LabelQR && typeof window.jsQR==='function'),decoded:0,unsupported:0};
@@ -651,7 +657,7 @@ async function scanLive(capture = false) {
     if (ticket !== session || cropTicket !== cropVersion || !stream || pending) return;
     if (qrReadings.length) {
       if(capture) freezeCamera(display,qrReadings);
-      else if(multiScan) { detectionFrame=display;collectMulti(qrReadings);showScanSuccess(qrReadings[0].code);setGuide('ready', 'Serial saved · point at the next label');liveStatus(`${multiReadings.length} serial${multiReadings.length === 1 ? '' : 's'} ready. Keep scanning or add all to draft.`); }
+      else if(multiScan) { const added=collectMulti(qrReadings);multiCooldownUntil=Date.now()+(added?650:450);if(added){detectionFrame=display;showScanSuccess(qrReadings[0].code);setGuide('ready', 'Serial saved · point at the next label');liveStatus(`${multiReadings.length} serial${multiReadings.length === 1 ? '' : 's'} ready. Keep scanning or add all to draft.`);} }
       else { analysisPaused=true;detectionFrame=display;detected=qrReadings;renderDetections();showScanSuccess(qrReadings[0].code);setGuide('ready', 'Good distance · hold still');liveStatus('Serial detected. Tap it to confirm, or scan the next label.'); }
       return;
     }
@@ -672,7 +678,7 @@ async function scanLive(capture = false) {
     const stable = available.filter(reading => nextReads.get(reading.code) >= 2);
     previousReads = nextReads;
     if (capture) freezeCamera(display,available);
-    else if(stable.length) { if(multiScan) { detectionFrame=display;collectMulti(stable);showScanSuccess(stable[0].code);setGuide('ready', 'Serial saved · point at the next label');liveStatus(`${multiReadings.length} serial${multiReadings.length === 1 ? '' : 's'} ready. Keep scanning or add all to draft.`); } else { analysisPaused=true;detectionFrame=display;detected=stable;renderDetections();showScanSuccess(stable[0].code);setGuide('ready', 'Good distance · hold still');liveStatus('Serial detected. Tap it to confirm, or scan the next label.'); } }
+    else if(stable.length) { if(multiScan) { const added=collectMulti(stable);multiCooldownUntil=Date.now()+(added?650:450);if(added){detectionFrame=display;showScanSuccess(stable[0].code);setGuide('ready', 'Serial saved · point at the next label');liveStatus(`${multiReadings.length} serial${multiReadings.length === 1 ? '' : 's'} ready. Keep scanning or add all to draft.`);} } else { analysisPaused=true;detectionFrame=display;detected=stable;renderDetections();showScanSuccess(stable[0].code);setGuide('ready', 'Good distance · hold still');liveStatus('Serial detected. Tap it to confirm, or scan the next label.'); } }
     else { setGuide(available.length ? 'steady' : 'align', available.length ? 'Text seen · hold steady' : 'Fit one label inside · move closer if it looks small'); liveStatus(available.length ? 'Text detected… hold steady.' : qrDiagnostics.unsupported ? 'QR read, but its serial format is unsupported. Try a close photo of the printed text.' : 'QR is not readable yet. Keep one whole QR in the guide; avoid glare and wait for focus.'); }
   } catch {
     if (ticket === session && stream) liveStatus('Text fallback failed to load or read. QR scanning will keep trying; you can also take a close photo.');
