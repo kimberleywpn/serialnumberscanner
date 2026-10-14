@@ -474,7 +474,12 @@ async function startCamera() {
     stopCamera(message, false);
   }
 }
-$('#liveButton').onclick = () => { if (stream || starting) stopCamera(); else startCamera(); };
+$('#liveButton').onclick = () => {
+  if (!stream && !starting) { startCamera(); return; }
+  const unadded = multiScan ? multiReadings.length : Math.max(detected.length, pending ? 1 : 0);
+  if (stream && unadded && !confirm(`Stop camera and discard ${unadded} detected serial${unadded === 1 ? '' : 's'} that are not in the draft?`)) return;
+  stopCamera('Camera stopped.', false);
+};
 function loadPhoto(event) {
   if (!LabelLensAccount.canScan()) { event.target.value = ''; return; }
   const file = event.target.files[0]; if (!file) return;
