@@ -541,7 +541,7 @@ function getWorker() {
   })().catch(error => { workerPromise = null; throw error; });
   return workerPromise;
 }
-function scheduleLive(delay = 350) {
+function scheduleLive(delay = 250) {
   clearTimeout(loopTimer);
   if (stream && !pending && !starting && !frozen && !analysisPaused) loopTimer = setTimeout(scanLive, delay);
 }
