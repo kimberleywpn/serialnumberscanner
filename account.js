@@ -20,7 +20,7 @@
     el('productRating').replaceChildren(new Option('Choose rating', ''));
     el('productType').replaceChildren(new Option('Choose type', ''));
     el('productLitres').replaceChildren(new Option('Choose litres', ''));
-    el('productDetails').textContent = ''; el('submissionSummary').textContent = '';
+    el('productDetails').textContent = ''; el('submissionSummary').textContent = ''; el('currentSpec').textContent = 'Current spec: Not selected';
     el('exportExcel').hidden = true; el('exportExcel').disabled = false;
     el('appContent').hidden = true; el('loginPanel').hidden = false;
     el('signedInAs').textContent = ''; el('password').value = '';
@@ -77,6 +77,7 @@
     el('exportExcel').disabled = exporting || !user || user.role !== 'admin';
     const selected = product();
     el('productDetails').textContent = selected ? `${selected.model} | ${gradeLabel(selected.viscosity)} | ${typeLabel(selected.oil_type)}\nSpecification: ${selected.ratings}` : '';
+    el('currentSpec').textContent = selected ? `Current spec: ${selected.brand} | ${selected.model} | ${gradeLabel(selected.viscosity)} | ${typeLabel(selected.oil_type)} | ${el('productLitres').value || 'Litres not selected'}` : 'Current spec: Not selected';
     el('submissionSummary').textContent = selected && draft.length && ready() ? `${selected.brand} · ${selected.model} | ${gradeLabel(selected.viscosity)} | ${typeLabel(selected.oil_type)} · ${el('productLitres').value} — Dealer: ${el('dealerName').value.trim()} — Batch: ${el('batchName').value.trim()}` : '';
     status('setupStatus', user?.role === 'viewer' ? 'Your shared account is read-only. You can view your history.' : locked ? 'Product is selected for this draft. Dealer and batch are optional.' : ready() ? 'Ready to submit. These details apply to every serial in this draft.' : draft.length ? `Scan complete for ${draft.length} serial${draft.length === 1 ? '' : 's'}. Select the product and litres before submitting.` : 'You can scan now. Select the product and litres before submitting.');
     scanner()?.sync();
