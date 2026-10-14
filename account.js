@@ -54,7 +54,7 @@
   const addOptions = (id, entries) => entries.forEach(([label, value]) => el(id).add(new Option(label, value)));
   function product() { return products.find(entry => entry.id === el('productType').value); }
   function ready() {
-    return Boolean(user && user.role !== 'viewer' && !submitting && product() && el('productForm').checkValidity() && el('dealerName').value.trim() && el('batchName').value.trim());
+    return Boolean(user && user.role !== 'viewer' && !submitting && product() && el('productLitres').value && el('productForm').checkValidity());
   }
   function canScan() {
     return Boolean(user && user.role !== 'viewer' && !submitting);
@@ -64,7 +64,8 @@
     // details only once they are complete, so every saved serial shares them.
     const locked = submitting || (draft.length > 0 && ready());
     const readOnly = locked || user?.role === 'viewer';
-    ['productBrand','productLitres','dealerName','batchName'].forEach(id => { el(id).disabled = readOnly; });
+    ['productBrand','productLitres'].forEach(id => { el(id).disabled = readOnly; });
+    ['dealerName','batchName'].forEach(id => { el(id).disabled = submitting || user?.role === 'viewer'; });
     el('productModel').disabled = readOnly || !el('productBrand').value;
     el('productRating').disabled = readOnly || !el('productModel').value;
     el('productType').disabled = readOnly || !el('productRating').value;
@@ -77,7 +78,7 @@
     const selected = product();
     el('productDetails').textContent = selected ? `${selected.model} | ${gradeLabel(selected.viscosity)} | ${typeLabel(selected.oil_type)}\nSpecification: ${selected.ratings}` : '';
     el('submissionSummary').textContent = selected && draft.length && ready() ? `${selected.brand} · ${selected.model} | ${gradeLabel(selected.viscosity)} | ${typeLabel(selected.oil_type)} · ${el('productLitres').value} — Dealer: ${el('dealerName').value.trim()} — Batch: ${el('batchName').value.trim()}` : '';
-    status('setupStatus', user?.role === 'viewer' ? 'Your shared account is read-only. You can view your history.' : locked ? 'Product and batch are locked to this draft. Submit or clear the draft to change them.' : ready() ? 'Ready to submit. These details apply to every serial in this draft.' : draft.length ? `Scan complete for ${draft.length} serial${draft.length === 1 ? '' : 's'}. Complete the product and batch fields before submitting.` : 'You can scan now. Complete the fields before submitting.');
+    status('setupStatus', user?.role === 'viewer' ? 'Your shared account is read-only. You can view your history.' : locked ? 'Product is selected for this draft. Dealer and batch are optional.' : ready() ? 'Ready to submit. These details apply to every serial in this draft.' : draft.length ? `Scan complete for ${draft.length} serial${draft.length === 1 ? '' : 's'}. Select the product and litres before submitting.` : 'You can scan now. Select the product and litres before submitting.');
     scanner()?.sync();
   }
   function fillProducts(data) {
@@ -188,7 +189,7 @@
     button.disabled = true;
     const form = document.createElement('form'); form.className = 'history-editor';
     const options = products.map(p => `<option value="${escape(p.id)}">${escape(p.brand)} | ${escape(p.model)} | ${escape(gradeLabel(p.viscosity))} | ${escape(typeLabel(p.oil_type))}</option>`).join('');
-    form.innerHTML = `<label>Product<select name="product" required>${options}</select></label><label>Litres<select name="litres">${['1L','3.5L','4L','5L','18L'].map(v=>`<option>${v}</option>`).join('')}</select></label><label>Dealer name<input name="dealer" maxlength="120" required></label><label>Batch<input name="batch" maxlength="120" required></label><label>Serial numbers — one per line<textarea name="serials" rows="6" required autocapitalize="characters" spellcheck="false"></textarea></label><div class="confirm-actions"><button type="submit" class="btn btn-main">Save changes</button><button type="button" class="btn btn-soft" name="cancel">Cancel</button></div><p class="form-status" role="status"></p>`;
+    form.innerHTML = `<label>Product<select name="product" required>${options}</select></label><label>Litres<select name="litres">${['1L','3.5L','4L','5L','18L'].map(v=>`<option>${v}</option>`).join('')}</select></label><label>Dealer name (optional)<input name="dealer" maxlength="120"></label><label>Batch (optional)<input name="batch" maxlength="120"></label><label>Serial numbers — one per line<textarea name="serials" rows="6" required autocapitalize="characters" spellcheck="false"></textarea></label><div class="confirm-actions"><button type="submit" class="btn btn-main">Save changes</button><button type="button" class="btn btn-soft" name="cancel">Cancel</button></div><p class="form-status" role="status"></p>`;
     const fields = form.elements;
     fields.product.value = entry.product_id; fields.litres.value = entry.litres;
     fields.dealer.value = entry.dealer; fields.batch.value = entry.batch;
