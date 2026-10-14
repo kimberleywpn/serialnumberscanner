@@ -44,7 +44,7 @@ function renderList() {
   $('#count').textContent = items.length;
   $('#emptyList').style.display = items.length ? 'none' : 'block';
   $('#copyAll').disabled = $('#clearAll').disabled = !items.length || LabelLensAccount.saving();
-  $('#results').innerHTML = items.map((item, i) => `<article class="result-row"><span class="number">${i + 1}</span><div><div class="result-code">${escapeHtml(item.code)}</div><div class="result-time">${escapeHtml(item.time)}${item.inferred ? ' · QR estimate' : ''}${item.edited ? ' · corrected' : ''}</div></div><div class="draft-row-actions"><button class="copy-one" data-edit="${i}" ${LabelLensAccount.saving() ? 'disabled' : ''}>Edit</button><button class="copy-one" data-i="${i}">Copy</button><button class="remove-one" data-remove="${i}" aria-label="Remove ${escapeHtml(item.code)}" ${LabelLensAccount.saving() ? 'disabled' : ''}>×</button></div></article>`).join('');
+  $('#results').innerHTML = items.map((item, i) => `<article class="result-row"><span class="number">${i + 1}</span><div><div class="result-code">${escapeHtml(item.code)}</div><div class="result-time">${escapeHtml(item.time)}${item.inferred ? ' · QR estimate' : ''}${item.edited ? ' · corrected' : ''}</div></div><div class="draft-row-actions"><button class="copy-one" data-edit="${i}" ${LabelLensAccount.saving() ? 'disabled' : ''}>Edit</button><button class="remove-one" data-remove="${i}" aria-label="Remove ${escapeHtml(item.code)}" ${LabelLensAccount.saving() ? 'disabled' : ''}>×</button></div></article>`).join('');
 }
 function save() {
   renderList();
@@ -180,8 +180,6 @@ async function copyText(text, message) {
 $('#results').onclick = event => {
   const edit = event.target.closest('[data-edit]');
   if (edit) editDraft(Number(edit.dataset.edit));
-  const button = event.target.closest('[data-i]');
-  if (button) copyText(items[Number(button.dataset.i)].code, 'Code copied');
   const remove = event.target.closest('[data-remove]');
   if (remove && !LabelLensAccount.saving()) { const [removed] = items.splice(Number(remove.dataset.remove), 1); confirmedReads.delete(removed.originalCode || removed.code); save(); validateConfirmation(); }
 };
