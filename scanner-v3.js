@@ -12,6 +12,7 @@ let frozen = false, detected = [], previousReads = new Map(), confirmedReads = n
 let qrPass = 0;
 let qrWorker = null, qrJob = 0, detectionFrame = null;
 const qrJobs = new Map();
+let successTimer = null;
 let qrDiagnostics = {available:false,decoded:0,unsupported:0}, torchOn=false;
 
 // Authenticated drafts never load device-wide localStorage history.
@@ -24,6 +25,17 @@ function toast(text) {
 function liveStatus(text) {
   $('#liveState').textContent = text;
   $('#liveState').dataset.active = Boolean(stream).toString();
+}
+function showScanSuccess(code) {
+  const notice = $('#scanSuccess');
+  clearTimeout(successTimer);
+  $('#scanSuccessCode').textContent = code;
+  notice.hidden = false;
+  requestAnimationFrame(() => notice.classList.add('show'));
+  successTimer = setTimeout(() => {
+    notice.classList.remove('show');
+    setTimeout(() => { if (!notice.classList.contains('show')) notice.hidden = true; }, 180);
+  }, 2200);
 }
 function escapeHtml(text) {
   return text.replace(/[&<>'"]/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;'}[c]));
@@ -183,6 +195,7 @@ $('#clearAll').onclick = () => {
 
 function resetDetections() {
   detected = []; detectionFrame = null; previousReads.clear(); frozen = false;
+  clearTimeout(successTimer); $('#scanSuccess').classList.remove('show'); $('#scanSuccess').hidden = true;
   $('#textOverlay').replaceChildren(); $('#detectedChoices').replaceChildren(); $('#textTray').hidden = true;
   frozenCanvas.style.display = 'none';
 }
@@ -588,7 +601,7 @@ async function scanLive(capture = false) {
     if (ticket !== session || cropTicket !== cropVersion || !stream || pending) return;
     if (qrReadings.length) {
       if(capture) freezeCamera(display,qrReadings);
-      else { detectionFrame=display;detected=qrReadings;renderDetections();liveStatus('Serial detected. Tap it to confirm, or point at another label.'); }
+      else { detectionFrame=display;detected=qrReadings;renderDetections();showScanSuccess(qrReadings[0].code);liveStatus('Serial detected. Tap it to confirm, or point at another label.'); }
       return;
     }
     if(combinedQR.length) {liveStatus('QR read — this serial is already in your list. Point at a different label.');return;}
@@ -606,7 +619,7 @@ async function scanLive(capture = false) {
     const stable = available.filter(reading => nextReads.get(reading.code) >= 2);
     previousReads = nextReads;
     if (capture) freezeCamera(display,available);
-    else if(stable.length) { detectionFrame=display;detected=stable;renderDetections();liveStatus('Serial detected. Tap it to confirm.'); }
+    else if(stable.length) { detectionFrame=display;detected=stable;renderDetections();showScanSuccess(stable[0].code);liveStatus('Serial detected. Tap it to confirm.'); }
     else liveStatus(available.length ? 'Text detected… hold steady.' : qrDiagnostics.unsupported ? 'QR read, but its serial format is unsupported. Try a close photo of the printed text.' : 'QR is not readable yet. Keep one whole QR in the guide; avoid glare and wait for focus.');
   } catch {
     if (ticket === session && stream) liveStatus('Text fallback failed to load or read. QR scanning will keep trying; you can also take a close photo.');
@@ -629,6 +642,7 @@ $('#scan').onclick = async () => {
     if (ticket !== session || cropTicket !== cropVersion) return;
     if (directQR.length) {
       detected = directQR.filter(reading=>!alreadyAdded(reading.code) && !confirmedReads.has(reading.code)); renderDetections();
+      if (detected.length) showScanSuccess(detected[0].code);
       liveStatus(detected.length ? `${detected.length} serial${detected.length === 1 ? '' : 's'} read from QR data. Check against the printed labels.` : 'All decoded QR serials are already in your list.');
       if (detected.length) $('#textTray').scrollIntoView({behavior:'smooth',block:'nearest'});
       else toast('All decoded QR serials are already in your list');
@@ -640,6 +654,7 @@ $('#scan').onclick = async () => {
     if (ticket !== session || cropTicket !== cropVersion) return;
     const combined = readings;
     detected = [...new Map(combined.map(reading => [reading.code, reading])).values()].filter(reading => !alreadyAdded(reading.code) && !confirmedReads.has(reading.code)); renderDetections();
+    if (detected.length) showScanSuccess(detected[0].code);
     if (combined.length && !detected.length) { toast('All detected serials are already in your list'); return; }
     if (detected.length) { liveStatus('Printed text found. Check it against the label.'); $('#textTray').scrollIntoView({behavior:'smooth', block:'nearest'}); }
     else if (cropped) {
