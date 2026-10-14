@@ -117,6 +117,21 @@
     if (options.cancelled?.()) return [];
     const {width, height, data} = frame;
     const exhaustive = Boolean(options.exhaustive), results = new Map(), seen = new Set();
+    // A centred label usually decodes immediately. Avoid the six-threshold
+    // finder search and tiled passes when the live frame already has a new QR.
+    if (!exhaustive && options.stopWhen) {
+      const qr = decode(data,width,height,{inversionAttempts:'attemptBoth'});
+      const reading = qr && parsePayload(qr.data);
+      if (reading && options.stopWhen(reading)) {
+        const corners = ['topLeftCorner','topRightCorner','bottomLeftCorner','bottomRightCorner'].map(key=>qr.location[key]);
+        if (corners.every(p=>p && Number.isFinite(p.x) && Number.isFinite(p.y))) {
+          options.onDecode?.({supported:true});
+          const left=Math.max(0,Math.min(...corners.map(p=>p.x))-5),top=Math.max(0,Math.min(...corners.map(p=>p.y))-5);
+          const right=Math.min(width,Math.max(...corners.map(p=>p.x))+5),bottom=Math.min(height,Math.max(...corners.map(p=>p.y))+5);
+          return [{...reading,corners:corners.map(p=>({x:p.x/width,y:p.y/height})),bounds:{left:left/width,top:top/height,width:(right-left)/width,height:(bottom-top)/height}}];
+        }
+      }
+    }
     const focused = finderRegions(frame).map(region=>({...region,focused:true}));
     const windows = [{x:0,y:0,w:width,h:height},...focused];
     const add = (x,y,w,h) => {
