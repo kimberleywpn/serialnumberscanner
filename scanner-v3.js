@@ -361,6 +361,7 @@ async function startCamera() {
   }
   const ticket = ++session;
   starting = true; lastConfirmedRead = ''; confirmedReads.clear(); resetDetections(); clearConfirmation(); $('#last').style.display = 'none';
+  getWorker().catch(() => {});
   liveStatus('Allow camera access to start live scanning.'); syncControls();
   try {
     const nextStream = await navigator.mediaDevices.getUserMedia({audio: false, video: {facingMode: {ideal: 'environment'}, width: {ideal: 1920}, height: {ideal: 1080}}});
@@ -397,6 +398,7 @@ $('#liveButton').onclick = () => { if (stream || starting) stopCamera(); else st
 function loadPhoto(event) {
   if (!LabelLensAccount.canScan()) { event.target.value = ''; return; }
   const file = event.target.files[0]; if (!file) return;
+  getWorker().catch(() => {});
   stopCamera('Photo mode. Tap Scan labels to read QR codes first.', false);
   confirmedReads.clear();
   const ticket = session, image = new Image(), url = URL.createObjectURL(file);
