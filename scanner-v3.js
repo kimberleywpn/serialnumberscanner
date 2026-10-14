@@ -11,6 +11,7 @@ const frozenCanvas = $('#freezeFrame');
 let frozen = false, detected = [], previousReads = new Map(), confirmedReads = new Set();
 let qrPass = 0;
 let livePass = 0;
+let analysisPaused = false;
 let qrWorker = null, qrJob = 0, detectionFrame = null;
 const qrJobs = new Map();
 let successTimer = null;
@@ -91,7 +92,8 @@ function syncControls() {
   $('#captureText').disabled = busy;
   $('#liveGuide').hidden = !stream || frozen || starting;
   $('#cameraTools').hidden = !stream || frozen || starting || ($('#zoomLabel').hidden && $('#torch').hidden);
-  $('#resumeScan').hidden = !stream || !frozen;
+  $('#resumeScan').hidden = !stream || (!frozen && !analysisPaused);
+  $('#resumeScan').textContent = analysisPaused ? 'Scan next label' : 'Continue scanning';
   $('#selectionHint').hidden = !stream || Boolean(pending);
   validateConfirmation(); renderList();
 }
@@ -331,7 +333,7 @@ function freezeCamera(frame, readings) {
 }
 async function resumeCamera() {
   if (!stream) return;
-  clearConfirmation(); resetDetections(); canvas.style.display = 'none'; video.style.display = 'block';
+  analysisPaused = false; clearConfirmation(); resetDetections(); canvas.style.display = 'none'; video.style.display = 'block';
   $('#last').style.display = 'none';
   const ticket = session;
   try { await video.play(); }
@@ -386,7 +388,7 @@ async function startCamera() {
   getWorker().catch(() => {});
   liveStatus('Allow camera access to start live scanning.'); syncControls();
   try {
-    const nextStream = await navigator.mediaDevices.getUserMedia({audio: false, video: {facingMode: {ideal: 'environment'}, width: {ideal: 1920}, height: {ideal: 1080}}});
+    const nextStream = await navigator.mediaDevices.getUserMedia({audio: false, video: {facingMode: {ideal: 'environment'}, width: {ideal: 1280}, height: {ideal: 720}, frameRate: {ideal: 15, max: 24}}});
     if (ticket !== session) { nextStream.getTracks().forEach(track => track.stop()); return; }
     stream = nextStream;
     video.srcObject = stream;
@@ -404,7 +406,7 @@ async function startCamera() {
     starting = false; syncControls();
     requestAnimationFrame(() => { if (ticket === session) placeDefault(true); });
     stream.getTracks().forEach(track => track.addEventListener('ended', () => { if (ticket === session) stopCamera('Camera disconnected. Tap Start live scan to retry.'); }, {once: true}));
-  qrPass = 0; livePass = 0;
+    qrPass = 0; livePass = 0; analysisPaused = false;
     setGuide('align', 'Fit one label inside · fill most of the frame');
     liveStatus('Point at one QR code. Printed text is the fallback.');
     scheduleLive(200);
@@ -539,9 +541,9 @@ function getWorker() {
   })().catch(error => { workerPromise = null; throw error; });
   return workerPromise;
 }
-function scheduleLive(delay = 200) {
+function scheduleLive(delay = 350) {
   clearTimeout(loopTimer);
-  if (stream && !pending && !starting && !frozen) loopTimer = setTimeout(scanLive, delay);
+  if (stream && !pending && !starting && !frozen && !analysisPaused) loopTimer = setTimeout(scanLive, delay);
 }
 async function readQR(frame, exhaustive, ticket) {
   qrDiagnostics={available:Boolean(window.LabelQR && typeof window.jsQR==='function'),decoded:0,unsupported:0};
@@ -611,7 +613,7 @@ async function scanLive(capture = false) {
     if (ticket !== session || cropTicket !== cropVersion || !stream || pending) return;
     if (qrReadings.length) {
       if(capture) freezeCamera(display,qrReadings);
-      else { detectionFrame=display;detected=qrReadings;renderDetections();showScanSuccess(qrReadings[0].code);setGuide('ready', 'Good distance · hold still');liveStatus('Serial detected. Tap it to confirm, or point at another label.'); }
+      else { analysisPaused=true;detectionFrame=display;detected=qrReadings;renderDetections();showScanSuccess(qrReadings[0].code);setGuide('ready', 'Good distance · hold still');liveStatus('Serial detected. Tap it to confirm, or scan the next label.'); }
       return;
     }
     if(combinedQR.length) {liveStatus('QR read — this serial is already in your list. Point at a different label.');return;}
@@ -631,7 +633,7 @@ async function scanLive(capture = false) {
     const stable = available.filter(reading => nextReads.get(reading.code) >= 2);
     previousReads = nextReads;
     if (capture) freezeCamera(display,available);
-    else if(stable.length) { detectionFrame=display;detected=stable;renderDetections();showScanSuccess(stable[0].code);setGuide('ready', 'Good distance · hold still');liveStatus('Serial detected. Tap it to confirm.'); }
+    else if(stable.length) { analysisPaused=true;detectionFrame=display;detected=stable;renderDetections();showScanSuccess(stable[0].code);setGuide('ready', 'Good distance · hold still');liveStatus('Serial detected. Tap it to confirm, or scan the next label.'); }
     else { setGuide(available.length ? 'steady' : 'align', available.length ? 'Text seen · hold steady' : 'Fit one label inside · move closer if it looks small'); liveStatus(available.length ? 'Text detected… hold steady.' : qrDiagnostics.unsupported ? 'QR read, but its serial format is unsupported. Try a close photo of the printed text.' : 'QR is not readable yet. Keep one whole QR in the guide; avoid glare and wait for focus.'); }
   } catch {
     if (ticket === session && stream) liveStatus('Text fallback failed to load or read. QR scanning will keep trying; you can also take a close photo.');
