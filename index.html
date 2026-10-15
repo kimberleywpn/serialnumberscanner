@@ -46,7 +46,6 @@
     /* Thistle palette */
     :root{--color-thistle-50:#f0eff5;--color-thistle-100:#e1dfec;--color-thistle-200:#c3c0d8;--color-thistle-300:#a6a0c5;--color-thistle-400:#8881b1;--color-thistle-500:#6a619e;--color-thistle-600:#554e7e;--color-thistle-700:#403a5f;--color-thistle-800:#2a273f;--color-thistle-900:#151320;--color-thistle-950:#0f0e16;--ink:var(--color-thistle-900);--paper:#fff;--card:var(--color-thistle-100);--muted:#5d5a70;--line:var(--color-thistle-200);--mint:var(--color-thistle-300);--mint-dark:var(--color-thistle-600);--orange:var(--color-thistle-300);--shadow:0 10px 28px rgba(42,39,63,.12)}
     html,body{background:#fff}.topbar{background:rgba(255,255,255,.94);border-color:var(--color-thistle-200)}.panel{background:var(--color-thistle-100);border-color:var(--color-thistle-200)}.account-form input,.manual-form input,.product-panel input,.product-panel select,.history-filter input,.history-filter select,.history-editor input,.history-editor select,.history-editor textarea{background:#fff;border-color:var(--color-thistle-200)}input:focus-visible,select:focus-visible,.product-form input:focus,.product-form select:focus,.history-filter input:focus,.history-filter select:focus{outline-color:rgba(136,129,177,.42);border-color:var(--color-thistle-500)}.btn-main{background:var(--color-thistle-600)}.btn-soft,.mini{background:var(--color-thistle-200);border-color:var(--color-thistle-300)}.scan{background:var(--color-thistle-300);color:var(--ink);box-shadow:0 6px 14px rgba(106,97,158,.18)}.number{background:var(--color-thistle-200);color:var(--ink)}.result-row,.saved-card{background:rgba(255,255,255,.7);border-color:var(--color-thistle-200)}.saved-codes{background:var(--color-thistle-50)}.serial-choice{background:var(--color-thistle-50);border-color:var(--color-thistle-200);color:var(--ink)}.live-guide{border-color:var(--color-thistle-400)}.live-guide[data-state="ready"]{border-color:var(--color-thistle-600)}.live-guide[data-state="ready"] .live-guide-tip{background:var(--color-thistle-600)}.scan-success{background:var(--color-thistle-600)}.scan-success-icon{background:var(--color-thistle-300);color:var(--ink)}.toast{background:var(--color-thistle-600)}.batch-scan-actions .btn-main{background:var(--color-thistle-600)}.account-bar,.product-details,.live-state,.selection-hint,.text-tray p,.form-status{color:var(--muted)}.current-spec{margin:-6px 0 13px;padding:9px 10px;border:1px solid var(--color-thistle-200);border-radius:9px;background:rgba(255,255,255,.54);color:var(--color-thistle-700);font-size:.82rem;font-weight:750;line-height:1.4}.confirm-actions{grid-template-columns:1fr 54px}.delete-detected{padding:0!important;color:var(--color-thistle-700)}.delete-detected svg{width:21px;height:21px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
-    .help-guide{margin-top:14px;border:1px solid var(--color-thistle-200);border-radius:12px;background:rgba(255,255,255,.66);overflow:hidden}.help-guide summary{min-height:50px;display:flex;align-items:center;padding:0 15px;cursor:pointer;font-weight:850;color:var(--color-thistle-700);list-style:none}.help-guide summary::-webkit-details-marker{display:none}.help-guide summary:after{content:'+';margin-left:auto;font-size:1.35rem;font-weight:500}.help-guide[open] summary{border-bottom:1px solid var(--color-thistle-200)}.help-guide[open] summary:after{content:'−'}.help-guide ol{margin:0;padding:14px 18px 15px 39px;color:var(--color-thistle-700);font-size:.9rem;line-height:1.55}.help-guide li+li{margin-top:9px}.help-guide strong{color:var(--color-thistle-900)}
   </style>
 </head>
 <body>
@@ -59,16 +58,6 @@
         <button id="signIn" class="btn btn-main" type="submit" disabled>Sign in</button>
       </form><p id="loginStatus" class="form-status" role="status">Checking session…</p>
     </section>
-    <details class="help-guide">
-        <summary>How to use this recorder</summary>
-        <ol>
-          <li><strong>Sign in</strong> with your shared staff account.</li>
-          <li><strong>Choose the product</strong>, grade, type and litres. Dealer name and batch are optional.</li>
-          <li><strong>Scan the label</strong> using live scan, a new photo or an uploaded photo. Keep one label close, sharp and free from glare.</li>
-          <li><strong>Check the serial</strong>, correct it if needed, then tap <strong>Add to list</strong>. Use Multi-scan when collecting several labels.</li>
-          <li><strong>Submit serials</strong> when the list is complete. Your submitted records appear in My submitted history.</li>
-        </ol>
-    </details>
     <div id="appContent" hidden>
     <div class="account-bar"><span id="signedInAs"></span><button id="signOut" class="mini" type="button">Sign out</button></div>
     <section class="panel product-panel" aria-labelledby="productTitle">
