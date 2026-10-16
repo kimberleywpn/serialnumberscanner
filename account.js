@@ -31,13 +31,25 @@
     const headers = accessToken ? {'Authorization':`Bearer ${accessToken}`} : {};
     if (body !== undefined) Object.assign(headers, {'Content-Type':'application/json', 'X-Label-Lens-CSRF':csrf, 'X-Label-Lens-Origin':location.origin});
     let response;
-    try {
-      response = await fetch(API_BASE + path, {
+    const attempts = body === undefined ? 2 : 1;
+    for (let attempt = 0; attempt < attempts; attempt++) {
+      try {
+        response = await fetch(API_BASE + path, {
         method: body === undefined ? 'GET' : 'POST', credentials:'omit', cache:'no-store', headers,
         signal:AbortSignal.timeout(timeoutMs), ...(body === undefined ? {} : {body:JSON.stringify(body)})
-      });
-    } catch (error) {
-      throw new Error(error?.name === 'TimeoutError' ? 'The scanner server took too long to respond. Check that the scanner PC and VS Code tunnel are running.' : 'Cannot reach the scanner server. Check that the scanner PC and VS Code tunnel are running.');
+        });
+        if (body === undefined && [502, 503, 504].includes(response.status) && attempt + 1 < attempts) {
+          await new Promise(resolve => setTimeout(resolve, 750));
+          continue;
+        }
+        break;
+      } catch (error) {
+        if (attempt + 1 < attempts) {
+          await new Promise(resolve => setTimeout(resolve, 750));
+          continue;
+        }
+        throw new Error(error?.name === 'TimeoutError' ? 'Connection timed out. Please try again. Your saved login and draft are kept.' : 'Connection interrupted. Please try again. Your saved login and draft are kept.');
+      }
     }
     const result = await response.json().catch(() => null);
     if (!response.ok) {
@@ -231,7 +243,6 @@
   async function loadHistory(append = false) {
     if (!user || (append && (historyBusy || !nextBefore))) return;
     const epoch = ++historyEpoch; historyBusy = true;
-    if (!append) { el('savedResults').replaceChildren(); nextBefore = null; }
     el('olderHistory').hidden = true; el('refreshHistory').disabled = true;
     el('savedTitle').textContent = el('historyScope').value === 'all' ? 'Admin master history' : 'My submitted history';
     status('historyStatus', 'Loading submissions…');
@@ -242,6 +253,7 @@
       // Dev Tunnel, so give it more time than lightweight scanner requests.
       const result = await api('/api/submissions?' + params, undefined, 30000);
       if (epoch !== historyEpoch) return;
+      if (!append) el('savedResults').replaceChildren();
       result.submissions.forEach(renderSubmission); nextBefore = result.next_before;
       status('historyStatus', el('savedResults').childElementCount ? `${el('savedResults').childElementCount} submission${el('savedResults').childElementCount === 1 ? '' : 's'} shown.` : 'No submitted scans found.');
     } catch (error) { if (epoch === historyEpoch) status('historyStatus', error.message, true); }
@@ -281,7 +293,7 @@
     el('signIn').disabled = true;
     if (!accessToken) { status('loginStatus', 'Sign in with your shared account.'); el('signIn').disabled = false; sync(); return; }
     try { await enter(await api('/api/auth/me')); }
-    catch (error) { if (error.status !== 401) { clearPrivate(); status('loginStatus', error.message, true); } else status('loginStatus', 'Sign in with your shared account.'); }
+    catch (error) { if (error.status !== 401) { status('loginStatus', error.message, true); } else status('loginStatus', 'Sign in with your shared account.'); }
     finally { el('signIn').disabled = false; sync(); }
   })();
 })();
