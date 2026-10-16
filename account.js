@@ -185,8 +185,24 @@
       const edit = document.createElement('button'); edit.type = 'button'; edit.className = 'mini'; edit.textContent = 'Edit submission';
       edit.onclick = () => editSubmission(entry, card, edit);
       card.append(edit);
+      const remove = document.createElement('button'); remove.type = 'button'; remove.className = 'mini clear'; remove.textContent = 'Delete submission';
+      remove.onclick = () => deleteSubmission(entry, remove);
+      card.append(remove);
     }
     el('savedResults').append(card);
+  }
+  async function deleteSubmission(entry, button) {
+    const count = entry.serials.length;
+    if (!confirm(`Delete this submission and its ${count} serial${count === 1 ? '' : 's'}? This cannot be undone.`)) return;
+    button.disabled = true;
+    try {
+      await api(`/api/submissions/${entry.id}/delete`, {revision:entry.revision});
+      status('historyStatus', 'Submission deleted.');
+      await loadHistory();
+    } catch (error) {
+      button.disabled = false;
+      status('historyStatus', error.message, true);
+    }
   }
   function editSubmission(entry, card, button) {
     button.disabled = true;
