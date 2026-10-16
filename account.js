@@ -220,7 +220,9 @@
     const params = new URLSearchParams({scope:el('historyScope').value, q:el('historyQuery').value.trim()});
     if (append) params.set('before', nextBefore);
     try {
-      const result = await api('/api/submissions?' + params);
+      // History can include many serials per submission and travel through the
+      // Dev Tunnel, so give it more time than lightweight scanner requests.
+      const result = await api('/api/submissions?' + params, undefined, 30000);
       if (epoch !== historyEpoch) return;
       result.submissions.forEach(renderSubmission); nextBefore = result.next_before;
       status('historyStatus', el('savedResults').childElementCount ? `${el('savedResults').childElementCount} submission${el('savedResults').childElementCount === 1 ? '' : 's'} shown.` : 'No submitted scans found.');
@@ -266,3 +268,20 @@
   })();
 })();
 
+145-  el('loginForm').onsubmit = async event => {
+146-    event.preventDefault(); el('signIn').disabled = true; status('loginStatus', 'Signing in…');
+147:    try { await enter(await api('/api/auth/login', {username:el('username').value.trim(), password:el('password').value}, 30000)); }
+148-    catch (error) { clearPrivate(); status('loginStatus', error.message, true); }
+149-    finally { el('signIn').disabled = false; }
+--
+223-      // History can include many serials per submission and travel through the
+224-      // Dev Tunnel, so give it more time than lightweight scanner requests.
+225:      const result = await api('/api/submissions?' + params, undefined, 30000);
+226-      if (epoch !== historyEpoch) return;
+227-      result.submissions.forEach(renderSubmission); nextBefore = result.next_before;
+--
+239-      const response = await fetch(API_BASE + '/api/exports/submissions.xlsx?' + query, {
+240-        headers:{'Authorization':`Bearer ${accessToken}`, 'Accept':'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'},
+241:        credentials:'omit', cache:'no-store', signal:AbortSignal.timeout(30000)
+242-      });
+243-      if (!response.ok) {
