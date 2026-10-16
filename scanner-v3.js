@@ -12,7 +12,7 @@ let frozen = false, detected = [], previousReads = new Map(), confirmedReads = n
 let qrPass = 0;
 let livePass = 0;
 let analysisPaused = false;
-let multiScan = false, multiReadings = [];
+let multiScan = true, multiReadings = [];
 let multiCooldownUntil = 0;
 let qrWorker = null, qrJob = 0, detectionFrame = null;
 const qrJobs = new Map();
@@ -83,9 +83,6 @@ function syncControls() {
   const canScan = LabelLensAccount.canScan();
   $('#liveButton').textContent = starting ? 'Cancel camera' : stream ? 'Stop camera' : 'Start live scan';
   $('#liveButton').disabled = !canScan && !stream && !starting || busy && !stream && !starting;
-  $('#multiToggle').textContent = multiScan ? 'Multi-scan: on' : 'Multi-scan: off';
-  $('#multiToggle').setAttribute('aria-pressed', String(multiScan));
-  $('#multiToggle').disabled = starting || frozen || Boolean(pending);
   $('#scan').hidden = Boolean(stream || starting || pending);
   $('#scan').disabled = !canScan || !source || busy;
   $('#left').disabled = $('#right').disabled = !source || busy || Boolean(stream) || starting;
@@ -257,14 +254,6 @@ function collectMulti(readings) {
   if (added) renderDetections();
   return added;
 }
-$('#multiToggle').onclick = () => {
-  if (starting || frozen || pending) return;
-  multiScan = !multiScan;
-  multiCooldownUntil = 0;
-  if (!multiScan) { multiReadings = []; detected = []; renderDetections(); toast('Multi-scan cleared'); }
-  else toast('Multi-scan is on — scan labels, then add all when ready');
-  syncControls();
-};
 $('#addDetected').onclick = () => {
   if (!LabelLensAccount.canScan() || LabelLensAccount.saving()) return;
   const readings = multiReadings.filter(reading => SERIAL_FORMAT.test(reading.code) && !alreadyAdded(reading.code));
@@ -476,7 +465,7 @@ async function startCamera() {
 }
 $('#liveButton').onclick = () => {
   if (!stream && !starting) { startCamera(); return; }
-  const unadded = multiScan ? multiReadings.length : Math.max(detected.length, pending ? 1 : 0);
+  const unadded = multiReadings.length;
   if (stream && unadded && !confirm(`Stop camera and discard ${unadded} detected serial${unadded === 1 ? '' : 's'} that are not in the draft?`)) return;
   stopCamera('Camera stopped.', false);
 };
