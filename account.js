@@ -27,7 +27,7 @@
     status('submissionStatus', 'Drafts are held in memory. Submit before leaving or signing out.');
     sync();
   }
-  async function api(path, body, timeoutMs = 12000) {
+  async function api(path, body, timeoutMs = 8000) {
     const headers = accessToken ? {'Authorization':`Bearer ${accessToken}`} : {};
     if (body !== undefined) Object.assign(headers, {'Content-Type':'application/json', 'X-Label-Lens-CSRF':csrf, 'X-Label-Lens-Origin':location.origin});
     let response;
@@ -158,7 +158,7 @@
   }
   el('loginForm').onsubmit = async event => {
     event.preventDefault(); el('signIn').disabled = true; status('loginStatus', 'Signing in…');
-    try { await enter(await api('/api/auth/login', {username:el('username').value.trim(), password:el('password').value}, 30000)); }
+    try { await enter(await api('/api/auth/login', {username:el('username').value.trim(), password:el('password').value}, 15000)); }
     catch (error) { clearPrivate(); status('loginStatus', error.message, true); }
     finally { el('signIn').disabled = false; }
   };
@@ -251,7 +251,7 @@
     try {
       // History can include many serials per submission and travel through the
       // Dev Tunnel, so give it more time than lightweight scanner requests.
-      const result = await api('/api/submissions?' + params, undefined, 30000);
+      const result = await api('/api/submissions?' + params, undefined, 15000);
       if (epoch !== historyEpoch) return;
       if (!append) el('savedResults').replaceChildren();
       result.submissions.forEach(renderSubmission); nextBefore = result.next_before;
@@ -297,4 +297,3 @@
     finally { el('signIn').disabled = false; sync(); }
   })();
 })();
-
