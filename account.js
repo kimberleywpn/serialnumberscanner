@@ -137,10 +137,12 @@
     el('password').value = ''; el('signedInAs').textContent = `${user.username} · ${user.role === 'admin' ? 'Admin' : user.role === 'viewer' ? 'Read-only' : 'User'}`;
     el('historyScopeLabel').hidden = user.role !== 'admin';
     el('exportExcel').hidden = user.role !== 'admin';
-    const catalogue = await api('/api/products');
+    // Product choices and saved history are independent. Show the workspace at
+    // once and load both in parallel instead of making staff wait for each one.
+    el('loginPanel').hidden = true; el('appContent').hidden = false;
+    const [catalogue] = await Promise.all([api('/api/products'), loadHistory()]);
     if (epoch !== authEpoch) return;
-    fillProducts(catalogue); el('loginPanel').hidden = true; el('appContent').hidden = false;
-    await loadHistory();
+    fillProducts(catalogue);
   }
   el('loginForm').onsubmit = async event => {
     event.preventDefault(); el('signIn').disabled = true; status('loginStatus', 'Signing in…');
@@ -268,20 +270,3 @@
   })();
 })();
 
-145-  el('loginForm').onsubmit = async event => {
-146-    event.preventDefault(); el('signIn').disabled = true; status('loginStatus', 'Signing in…');
-147:    try { await enter(await api('/api/auth/login', {username:el('username').value.trim(), password:el('password').value}, 30000)); }
-148-    catch (error) { clearPrivate(); status('loginStatus', error.message, true); }
-149-    finally { el('signIn').disabled = false; }
---
-223-      // History can include many serials per submission and travel through the
-224-      // Dev Tunnel, so give it more time than lightweight scanner requests.
-225:      const result = await api('/api/submissions?' + params, undefined, 30000);
-226-      if (epoch !== historyEpoch) return;
-227-      result.submissions.forEach(renderSubmission); nextBefore = result.next_before;
---
-239-      const response = await fetch(API_BASE + '/api/exports/submissions.xlsx?' + query, {
-240-        headers:{'Authorization':`Bearer ${accessToken}`, 'Accept':'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'},
-241:        credentials:'omit', cache:'no-store', signal:AbortSignal.timeout(30000)
-242-      });
-243-      if (!response.ok) {
