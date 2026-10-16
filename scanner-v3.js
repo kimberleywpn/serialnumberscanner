@@ -650,7 +650,10 @@ async function scanLive(capture = false) {
     const centreDiagnostics={...qrDiagnostics};
     const hasDirectCentre=rawReadings.some(reading=>!reading.inferred && !alreadyAdded(reading.code) && !confirmedReads.has(reading.code));
     const needsHybrid=rawReadings.some(reading=>reading.inferred && reading.suffix && reading.bounds);
-    const inspectFullFrame=capture || needsHybrid || (!hasDirectCentre && livePass % 4 === 0);
+    // QR checks stay frequent. The hybrid reader invokes OCR, so only run it every
+    // third pass rather than competing with the camera preview on every frame.
+    const shouldReadHybrid = needsHybrid && (capture || livePass % 3 === 0);
+    const inspectFullFrame=capture || shouldReadHybrid || (!hasDirectCentre && livePass % 6 === 0);
     if(inspectFullFrame) {
       const full=wholeFrame(); image=full.image; display=full.display;
       const centreReadings=rawReadings.map(reading=>({...reading,corners:reading.corners?.map(p=>({x:centre.bounds.left+p.x*centre.bounds.width,y:centre.bounds.top+p.y*centre.bounds.height})),bounds:{left:centre.bounds.left+reading.bounds.left*centre.bounds.width,top:centre.bounds.top+reading.bounds.top*centre.bounds.height,width:reading.bounds.width*centre.bounds.width,height:reading.bounds.height*centre.bounds.height}}));
@@ -658,7 +661,9 @@ async function scanLive(capture = false) {
       rawReadings=[...new Map([...centreReadings,...fullReadings].map(reading=>[reading.code,reading])).values()];
       qrDiagnostics.decoded+=centreDiagnostics.decoded;qrDiagnostics.unsupported+=centreDiagnostics.unsupported;
     }
-    const combinedQR = needsHybrid ? await readHybridSerials(display,rawReadings,ticket) : rawReadings;
+    const combinedQR = shouldReadHybrid
+      ? await readHybridSerials(display,rawReadings,ticket)
+      : rawReadings.filter(reading => !reading.inferred);
     const qrReadings = combinedQR.filter(reading=>!alreadyAdded(reading.code) && !confirmedReads.has(reading.code));
     if (ticket !== session || cropTicket !== cropVersion || !stream || pending) return;
     if (qrReadings.length) {
@@ -670,7 +675,7 @@ async function scanLive(capture = false) {
     if(combinedQR.length) {liveStatus('QR read — this serial is already in your list. Point at a different label.');return;}
     if(!qrDiagnostics.available) {liveStatus('QR decoder did not load. Refresh this page while online.');return;}
     // OCR is the expensive fallback. Keep QR responsive and run text OCR periodically.
-    if (!capture && livePass % 5 !== 0 && typeof window.jsQR === 'function') {
+    if (!capture && livePass % 8 !== 0 && typeof window.jsQR === 'function') {
       setGuide('align', 'Keep one label inside · move closer if it looks small');
       liveStatus(qrDiagnostics.unsupported ? 'QR read, but this format is not supported. Trying printed text next.' : 'Centre one QR in the yellow guide. Move closer, then hold still for focus.'); return;
     }
