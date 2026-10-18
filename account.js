@@ -9,22 +9,33 @@
   const escape = value => String(value).replace(/[&<>"']/g, char => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
   function status(id, text, error = false) { el(id).textContent = text; el(id).dataset.error = String(error); }
   function scanner() { return window.LabelLensScanner; }
-  function clearPrivate() {
-    authEpoch++; historyEpoch++; user = null; csrf = ''; products = []; draft = []; retry = null;
+  function clearPrivate({preserveDraft = false} = {}) {
+    const savedDraft = preserveDraft ? scanner()?.items?.() || draft : [];
+    authEpoch++; historyEpoch++; user = null; csrf = '';
+    if (!preserveDraft) { products = []; retry = null; }
+    draft = savedDraft;
     accessToken = ''; localStorage.removeItem(TOKEN_KEY);
     nextBefore = null; submitting = false; exporting = false; historyBusy = false;
-    scanner()?.reset(); el('productForm').reset(); el('savedResults').replaceChildren();
+    if (preserveDraft) {
+      scanner()?.pause();
+    } else {
+      scanner()?.reset(); el('productForm').reset();
+    }
+    el('savedResults').replaceChildren();
     el('historyScope').value = 'mine'; el('historyQuery').value = '';
-    el('productBrand').replaceChildren(new Option('Choose brand', ''));
-    el('productModel').replaceChildren(new Option('Choose model', ''));
-    el('productRating').replaceChildren(new Option('Choose rating', ''));
-    el('productType').replaceChildren(new Option('Choose type', ''));
-    el('productLitres').replaceChildren(new Option('Choose litres', ''));
-    el('productDetails').textContent = ''; el('submissionSummary').textContent = ''; el('currentSpec').textContent = 'Current spec: Not selected';
+    if (!preserveDraft) {
+      el('productBrand').replaceChildren(new Option('Choose brand', ''));
+      el('productModel').replaceChildren(new Option('Choose model', ''));
+      el('productRating').replaceChildren(new Option('Choose rating', ''));
+      el('productType').replaceChildren(new Option('Choose type', ''));
+      el('productLitres').replaceChildren(new Option('Choose litres', ''));
+      el('productDetails').textContent = ''; el('submissionSummary').textContent = ''; el('currentSpec').textContent = 'Current spec: Not selected';
+    }
     el('exportExcel').hidden = true; el('exportExcel').disabled = false;
+    el('bootPanel').hidden = true;
     el('appContent').hidden = true; el('loginPanel').hidden = false;
     el('signedInAs').textContent = ''; el('password').value = '';
-    status('submissionStatus', 'Drafts are held in memory. Submit before leaving or signing out.');
+    if (!preserveDraft) status('submissionStatus', 'Drafts are held in memory. Submit before leaving or signing out.');
     sync();
   }
   async function api(path, body, timeoutMs = 8000) {
@@ -44,7 +55,7 @@
         }
         break;
       } catch (error) {
-        if (attempt + 1 < attempts) {
+        if (attempt + 1 < attempts && error?.name !== 'TimeoutError') {
           await new Promise(resolve => setTimeout(resolve, 750));
           continue;
         }
@@ -53,7 +64,7 @@
     }
     const result = await response.json().catch(() => null);
     if (!response.ok) {
-      if (response.status === 401 && path !== '/api/auth/login') { clearPrivate(); status('loginStatus', 'Session ended. Please sign in again.', true); }
+      if (response.status === 401 && path !== '/api/auth/login') { clearPrivate({preserveDraft:true}); status('loginStatus', 'Session ended. Sign in again to continue with your saved draft.', true); }
       throw Object.assign(new Error(typeof result?.detail === 'string' ? result.detail : 'Server unavailable. Your draft has not been submitted.'), {status:response.status});
     }
     if (!result) throw new Error('The scanner backend is not available at this address.');
@@ -91,13 +102,27 @@
     el('productDetails').textContent = selected ? `${selected.model} | ${gradeLabel(selected.viscosity)} | ${typeLabel(selected.oil_type)}\nSpecification: ${selected.ratings}` : '';
     el('currentSpec').textContent = selected ? `Current spec: ${selected.brand} | ${selected.model} | ${gradeLabel(selected.viscosity)} | ${typeLabel(selected.oil_type)} | ${el('productLitres').value || 'Litres not selected'}` : 'Current spec: Not selected';
     el('submissionSummary').textContent = selected && draft.length && ready() ? `${selected.brand} · ${selected.model} | ${gradeLabel(selected.viscosity)} | ${typeLabel(selected.oil_type)} · ${el('productLitres').value} — Dealer: ${el('dealerName').value.trim()} — Batch: ${el('batchName').value.trim()}` : '';
-    status('setupStatus', user?.role === 'viewer' ? 'Your shared account is read-only. You can view your history.' : locked ? 'Product is selected for this draft. Dealer and batch are optional.' : ready() ? 'Ready to submit. These details apply to every serial in this draft.' : draft.length ? `Scan complete for ${draft.length} serial${draft.length === 1 ? '' : 's'}. Select the product and litres before submitting.` : 'You can scan now. Select the product and litres before submitting.');
+    status('setupStatus', user?.role === 'viewer' ? 'Your shared account is read-only. You can view your history.' : locked ? 'Product is selected for this draft.' : ready() ? 'Ready to submit. These details apply to every serial in this draft.' : draft.length ? `Scan complete for ${draft.length} serial${draft.length === 1 ? '' : 's'}. Select the product and litres before submitting.` : 'You can scan now. Select the product and litres before submitting.');
     scanner()?.sync();
   }
   function fillProducts(data) {
+    const selected = {
+      brand:el('productBrand').value, model:el('productModel').value,
+      rating:el('productRating').value, type:el('productType').value,
+      litres:el('productLitres').value,
+    };
     products = data.products;
+    el('productBrand').replaceChildren(new Option('Choose brand', ''));
+    el('productLitres').replaceChildren(new Option('Choose litres', ''));
     for (const brand of [...new Set(products.map(entry => entry.brand))].sort()) el('productBrand').add(new Option(brand, brand));
     for (const litres of data.litres) el('productLitres').add(new Option(litres, litres));
+    if ([...el('productBrand').options].some(option => option.value === selected.brand)) {
+      el('productBrand').value = selected.brand; el('productBrand').onchange();
+      el('productModel').value = selected.model; el('productModel').onchange();
+      el('productRating').value = selected.rating; el('productRating').onchange();
+      el('productType').value = selected.type;
+    }
+    if ([...el('productLitres').options].some(option => option.value === selected.litres)) el('productLitres').value = selected.litres;
     sync();
   }
   el('productBrand').onchange = () => {
@@ -151,22 +176,24 @@
     el('exportExcel').hidden = user.role !== 'admin';
     // Product choices and saved history are independent. Show the workspace at
     // once and load both in parallel instead of making staff wait for each one.
-    el('loginPanel').hidden = true; el('appContent').hidden = false;
-    const [catalogue] = await Promise.all([api('/api/products'), loadHistory()]);
+    el('bootPanel').hidden = true; el('loginPanel').hidden = true; el('appContent').hidden = false;
+    const [catalogueResult] = await Promise.all([api('/api/products').then(value => ({value}), error => ({error})), loadHistory()]);
     if (epoch !== authEpoch) return;
-    fillProducts(catalogue);
+    if (catalogueResult.error) {
+      status('setupStatus', `Signed in, but product details could not load. ${catalogueResult.error.message} Refresh to try again.`, true);
+    } else fillProducts(catalogueResult.value);
   }
   el('loginForm').onsubmit = async event => {
     event.preventDefault(); el('signIn').disabled = true; status('loginStatus', 'Signing in…');
     try { await enter(await api('/api/auth/login', {username:el('username').value.trim(), password:el('password').value}, 15000)); }
-    catch (error) { clearPrivate(); status('loginStatus', error.message, true); }
+    catch (error) { clearPrivate({preserveDraft:true}); status('loginStatus', error.message, true); }
     finally { el('signIn').disabled = false; }
   };
   el('signOut').onclick = async () => {
     if (submitting || (draft.length && !confirm('Sign out and discard your unsubmitted draft?'))) return;
     el('signOut').disabled = true;
     try { await api('/api/auth/logout', {}); clearPrivate(); status('loginStatus', 'Signed out.'); }
-    catch (error) { status(user ? 'submissionStatus' : 'loginStatus', error.message, true); }
+    catch (error) { clearPrivate(); status('loginStatus', `Signed out on this device. ${error.message}`, true); }
     finally { el('signOut').disabled = false; }
   };
   el('submitBatch').onclick = async () => {
@@ -220,7 +247,7 @@
     button.disabled = true;
     const form = document.createElement('form'); form.className = 'history-editor';
     const options = products.map(p => `<option value="${escape(p.id)}">${escape(p.brand)} | ${escape(p.model)} | ${escape(gradeLabel(p.viscosity))} | ${escape(typeLabel(p.oil_type))}</option>`).join('');
-    form.innerHTML = `<label>Product<select name="product" required>${options}</select></label><label>Litres<select name="litres">${['1L','3.5L','4L','5L','18L'].map(v=>`<option>${v}</option>`).join('')}</select></label><label>Dealer name (optional)<input name="dealer" maxlength="120"></label><label>Batch (optional)<input name="batch" maxlength="120"></label><label>Serial numbers — one per line<textarea name="serials" rows="6" required autocapitalize="characters" spellcheck="false"></textarea></label><div class="confirm-actions"><button type="submit" class="btn btn-main">Save changes</button><button type="button" class="btn btn-soft" name="cancel">Cancel</button></div><p class="form-status" role="status"></p>`;
+    form.innerHTML = `<label>Product<select name="product" required>${options}</select></label><label>Litres<select name="litres">${['1L','3.5L','4L','5L','18L'].map(v=>`<option>${v}</option>`).join('')}</select></label><label>Dealer name<input name="dealer" maxlength="120"></label><label>Batch<input name="batch" maxlength="120"></label><label>Serial numbers — one per line<textarea name="serials" rows="6" required autocapitalize="characters" spellcheck="false"></textarea></label><div class="confirm-actions"><button type="submit" class="btn btn-main">Save changes</button><button type="button" class="btn btn-soft" name="cancel">Cancel</button></div><p class="form-status" role="status"></p>`;
     const fields = form.elements;
     fields.product.value = entry.product_id; fields.litres.value = entry.litres;
     fields.dealer.value = entry.dealer; fields.batch.value = entry.batch;
@@ -272,7 +299,7 @@
       });
       if (!response.ok) {
         const result = await response.json().catch(() => null);
-        if (response.status === 401) { clearPrivate(); status('loginStatus', 'Session ended. Please sign in again.', true); }
+        if (response.status === 401) { clearPrivate({preserveDraft:true}); status('loginStatus', 'Session ended. Sign in again to continue with your saved draft.', true); }
         throw new Error(typeof result?.detail === 'string' ? result.detail : 'Could not create the Excel export.');
       }
       const file = await response.blob();
@@ -291,9 +318,13 @@
   window.LabelLensAccount = {ready, canScan, saving:() => submitting, draftChanged};
   (async () => {
     el('signIn').disabled = true;
-    if (!accessToken) { status('loginStatus', 'Sign in with your shared account.'); el('signIn').disabled = false; sync(); return; }
+    if (!accessToken) { clearPrivate({preserveDraft:true}); status('loginStatus', 'Sign in with your shared account.'); el('signIn').disabled = false; return; }
     try { await enter(await api('/api/auth/me')); }
-    catch (error) { if (error.status !== 401) { status('loginStatus', error.message, true); } else status('loginStatus', 'Sign in with your shared account.'); }
+    catch (error) {
+      if (error.status !== 401) status('loginStatus', error.message, true);
+      else status('loginStatus', draft.length ? 'Session ended. Sign in again to continue with your saved draft.' : 'Sign in with your shared account.', Boolean(draft.length));
+    }
     finally { el('signIn').disabled = false; sync(); }
   })();
 })();
+
