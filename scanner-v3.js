@@ -6,13 +6,12 @@ const video = $('#video'), wrap = $('#wrap'), box = $('#box');
 let source = null, rotation = 0, drag = null, resizing = null, items = [];
 let stream = null, starting = false, workerPromise = null, busy = false;
 let session = 0, cropVersion = 0, loopTimer = null, pending = null;
-let lastCandidate = '', candidateReads = 0, skippedCode = '', skipUntil = 0, lastConfirmedRead = '';
+let skippedCode = '', skipUntil = 0;
 const frozenCanvas = $('#freezeFrame');
 let frozen = false, detected = [], previousReads = new Map(), confirmedReads = new Set();
 let qrPass = 0;
 let livePass = 0;
-let analysisPaused = false;
-let multiScan = true, multiReadings = [];
+let multiReadings = [];
 let multiCooldownUntil = 0;
 let qrWorker = null, qrJob = 0, detectionFrame = null;
 const qrJobs = new Map();
@@ -78,6 +77,10 @@ function extractCode(text, strict = false) {
   return candidates.sort((a, b) => b.length - a.length)[0] || (clean.length >= 5 ? clean : '');
 }
 function alreadyAdded(code) { return items.some(item => normalizeCode(item.code) === code); }
+function temporarilySkipped(code) {
+  if (Date.now() >= skipUntil) { skippedCode = ''; skipUntil = 0; return false; }
+  return code === skippedCode;
+}
 
 function syncControls() {
   const canScan = LabelLensAccount.canScan();
@@ -94,8 +97,8 @@ function syncControls() {
   $('#captureText').disabled = busy;
   $('#liveGuide').hidden = !stream || frozen || starting;
   $('#cameraTools').hidden = !stream || frozen || starting || ($('#zoomLabel').hidden && $('#torch').hidden);
-  $('#resumeScan').hidden = !stream || (!frozen && !analysisPaused);
-  $('#resumeScan').textContent = analysisPaused ? 'Scan next label' : 'Continue scanning';
+  $('#resumeScan').hidden = !stream || !frozen;
+  $('#resumeScan').textContent = 'Continue scanning';
   $('#selectionHint').hidden = !stream || Boolean(pending);
   validateConfirmation(); renderList();
 }
@@ -107,10 +110,10 @@ function validateConfirmation() {
   $('#confirmError').textContent = duplicate ? 'This code is already in your draft.' : !valid ? 'Use 3 letters followed by 6–10 digits.' : items.length >= 500 ? 'Submit this draft before adding more serials.' : '';
   return code;
 }
-function showConfirmation(code, origin) {
+function showConfirmation(code) {
   if (stream && !frozen && detectionFrame) freezeCamera(detectionFrame,detected);
   const reading = detected.find(item => item.code === code);
-  pending = {code, origin, method:reading?.method || 'ocr', inferred:Boolean(reading?.inferred)};
+  pending = {code, method:reading?.method || 'ocr', inferred:Boolean(reading?.inferred)};
   $('#confirmTitle').textContent = 'Confirm serial';
   $('#readingNote').textContent = pending.inferred
     ? 'Scanned estimate — edit only if needed.'
@@ -119,7 +122,7 @@ function showConfirmation(code, origin) {
   $('#last').style.display = 'none';
   validateConfirmation();
   syncControls();
-  if (stream) liveStatus('Check the text, then copy it or add it to your list.');
+  if (stream) liveStatus('Check the serial, then add it to your list.');
   renderDetections();
   $('#confirmation').scrollIntoView({behavior: 'smooth', block: 'nearest'});
 }
@@ -136,8 +139,6 @@ function editDraft(index) {
 }
 function clearConfirmation() {
   pending = null;
-  lastCandidate = '';
-  candidateReads = 0;
   syncControls();
   renderDetections();
 }
@@ -154,7 +155,6 @@ $('#confirmForm').addEventListener('submit', event => {
     save(); clearConfirmation(); toast('Serial updated');
     return;
   }
-  lastConfirmedRead = pending.code;
   confirmedReads.add(pending.code);
   detected = detected.filter(reading => reading.code !== pending.code);
   items.push({code, originalCode:pending.code, method:pending.method, inferred:pending.inferred, edited:code !== pending.code, time: new Intl.DateTimeFormat(undefined, {hour: 'numeric', minute: '2-digit'}).format(new Date())});
@@ -174,15 +174,15 @@ $('#tryAgain').onclick = () => {
   skippedCode = removedCode;
   skipUntil = Date.now() + 3500;
   detected = detected.filter(reading => reading.code !== removedCode);
-  if (multiScan) multiReadings = multiReadings.filter(reading => reading.code !== removedCode);
+  multiReadings = multiReadings.filter(reading => reading.code !== removedCode);
   clearConfirmation();
   if (!stream) return;
   if (frozen) {
     frozen = false; frozenCanvas.style.display = 'none'; video.style.display = 'block';
     video.play().then(() => {
       if (!stream) return;
-      renderDetections(); setGuide('align', multiScan ? 'Point at the next label' : 'Fit one label inside · fill most of the frame');
-      liveStatus(multiScan ? `${multiReadings.length} serial${multiReadings.length === 1 ? '' : 's'} ready. Keep scanning.` : 'Deleted. Point at another label.');
+      renderDetections(); setGuide('align', 'Point at the next label');
+      liveStatus(`${multiReadings.length} serial${multiReadings.length === 1 ? '' : 's'} ready. Keep scanning.`);
       syncControls(); scheduleLive(100);
     }).catch(() => stopCamera('Camera paused. Tap Start live scan to retry.'));
   } else { renderDetections(); liveStatus('Detected serial deleted.'); }
@@ -209,7 +209,7 @@ $('#results').onclick = event => {
 $('#copyAll').onclick = () => copyText(items.map(item => item.code).join('\n'), `${items.length} code${items.length === 1 ? '' : 's'} copied`);
 $('#clearAll').onclick = () => {
   if (LabelLensAccount.saving() || !items.length || !confirm('Discard this unsubmitted draft? Saved history will not be deleted.')) return;
-  items = []; lastConfirmedRead = ''; confirmedReads.clear(); save(); validateConfirmation(); $('#last').style.display = 'none'; toast('List cleared');
+  items = []; confirmedReads.clear(); save(); validateConfirmation(); $('#last').style.display = 'none'; toast('List cleared');
 };
 
 function resetDetections() {
@@ -221,13 +221,13 @@ function resetDetections() {
 }
 function renderDetections() {
   $('#textOverlay').replaceChildren(); $('#detectedChoices').replaceChildren();
-  const available = detected.filter(reading => !alreadyAdded(reading.code) && !confirmedReads.has(reading.code));
+  const available = detected.filter(reading => !temporarilySkipped(reading.code) && !alreadyAdded(reading.code) && !confirmedReads.has(reading.code));
   $('#textTray').hidden = !available.length;
-  $('#multiActions').hidden = !multiScan || !stream || !available.length;
-  $('#detectedHint').textContent = multiScan ? `${available.length} serial${available.length === 1 ? '' : 's'} ready. Continue scanning, then add all when ready.` : 'Tap a highlight or choose a serial below.';
+  $('#multiActions').hidden = !stream || !available.length;
+  $('#detectedHint').textContent = `${available.length} serial${available.length === 1 ? '' : 's'} ready. Continue scanning, then add all when ready.`;
   $('#addDetected').textContent = `Add all (${available.length}) to draft`;
   for (const reading of available) {
-    const choose = () => showConfirmation(reading.code, stream ? 'live' : 'photo');
+    const choose = () => showConfirmation(reading.code);
     const button = document.createElement('button');
     button.type = 'button'; button.className = 'serial-choice'; button.textContent = reading.code + (reading.inferred ? ' · QR estimate' : reading.method === 'hybrid' ? ' · Text + QR' : reading.method === 'qr' ? ' · QR' : '');
     button.setAttribute('aria-label', `Select serial ${reading.code}`); button.onclick = choose;
@@ -246,7 +246,7 @@ function collectMulti(readings) {
   const known = new Map(multiReadings.map(reading => [reading.code, reading]));
   const before = known.size;
   for (const reading of readings) {
-    if (!alreadyAdded(reading.code) && !confirmedReads.has(reading.code)) known.set(reading.code, reading);
+    if (!temporarilySkipped(reading.code) && !alreadyAdded(reading.code) && !confirmedReads.has(reading.code)) known.set(reading.code, reading);
   }
   multiReadings = [...known.values()].slice(0, Math.max(0, 500 - items.length));
   detected = multiReadings;
@@ -377,7 +377,7 @@ function freezeCamera(frame, readings) {
 }
 async function resumeCamera() {
   if (!stream) return;
-  analysisPaused = false; clearConfirmation(); resetDetections(); canvas.style.display = 'none'; video.style.display = 'block';
+  clearConfirmation(); resetDetections(); canvas.style.display = 'none'; video.style.display = 'block';
   $('#last').style.display = 'none';
   const ticket = session;
   try { await video.play(); }
@@ -412,14 +412,21 @@ function renderPhoto() {
   wrap.style.display = 'block'; $('#empty').style.display = 'none';
   requestAnimationFrame(() => placeDefault(false));
 }
-function stopCamera(message = 'Camera stopped.', keepPending = true) {
+function stopCamera(message = 'Camera stopped.', keepPending = true, preserveDetections = false) {
+  const saved = preserveDetections ? {detected, multiReadings, detectionFrame, multiCooldownUntil} : null;
   session++; cropVersion++; starting = false;
   clearTimeout(loopTimer); loopTimer = null;
   const previous = stream; stream = null;
   previous?.getTracks().forEach(track => track.stop());
   video.pause(); video.srcObject = null;
   if (!keepPending) clearConfirmation();
-  renderPhoto(); liveStatus(message); syncControls();
+  renderPhoto();
+  if (saved) {
+    detected = saved.detected; multiReadings = saved.multiReadings;
+    detectionFrame = saved.detectionFrame; multiCooldownUntil = saved.multiCooldownUntil;
+    renderDetections();
+  }
+  liveStatus(message); syncControls();
 }
 async function startCamera() {
   if (!LabelLensAccount.canScan()) return;
@@ -427,9 +434,8 @@ async function startCamera() {
     liveStatus('Live camera is unavailable here. Open this HTTPS link in Safari or Chrome, or upload a photo.'); return;
   }
   const ticket = ++session;
-  starting = true; lastConfirmedRead = ''; confirmedReads.clear(); resetDetections(); clearConfirmation(); $('#last').style.display = 'none';
+  starting = true; confirmedReads.clear(); resetDetections(); clearConfirmation(); $('#last').style.display = 'none';
   setGuide('align', 'Fit one label inside · fill most of the frame');
-  getWorker().catch(() => {});
   liveStatus('Allow camera access to start live scanning.'); syncControls();
   try {
     const nextStream = await navigator.mediaDevices.getUserMedia({audio: false, video: {facingMode: {ideal: 'environment'}, width: {ideal: 1280}, height: {ideal: 720}, frameRate: {ideal: 15, max: 24}}});
@@ -450,7 +456,7 @@ async function startCamera() {
     starting = false; syncControls();
     requestAnimationFrame(() => { if (ticket === session) placeDefault(true); });
     stream.getTracks().forEach(track => track.addEventListener('ended', () => { if (ticket === session) stopCamera('Camera disconnected. Tap Start live scan to retry.'); }, {once: true}));
-    qrPass = 0; livePass = 0; analysisPaused = false;
+    qrPass = 0; livePass = 0;
     setGuide('align', 'Fit one label inside · fill most of the frame');
     liveStatus('Point at one QR code. Printed text is the fallback.');
     scheduleLive(200);
@@ -488,7 +494,7 @@ $('#file').onchange = $('#upload').onchange = loadPhoto;
 $('#left').onclick = () => { clearConfirmation(); rotation -= 90; renderPhoto(); };
 $('#right').onclick = () => { clearConfirmation(); rotation += 90; renderPhoto(); };
 
-function cropChanged() { cropVersion++; lastCandidate = ''; candidateReads = 0; }
+function cropChanged() { cropVersion++; }
 function point(event) { const bounds = wrap.getBoundingClientRect(); return {x: event.clientX - bounds.left, y: event.clientY - bounds.top}; }
 function clampBox(left, top, width, height) {
   width = Math.min(wrap.clientWidth, Math.max(58, width)); height = Math.min(wrap.clientHeight, Math.max(18, height));
@@ -592,17 +598,17 @@ function getWorker() {
 }
 function scheduleLive(delay = 250) {
   clearTimeout(loopTimer);
-  const cooldown = multiScan ? Math.max(0, multiCooldownUntil - Date.now()) : 0;
-  if (stream && !pending && !starting && !frozen && !analysisPaused) loopTimer = setTimeout(scanLive, Math.max(delay, cooldown));
+  const cooldown = Math.max(0, multiCooldownUntil - Date.now());
+  if (stream && !pending && !starting && !frozen) loopTimer = setTimeout(scanLive, Math.max(delay, cooldown));
 }
-async function readQR(frame, exhaustive, ticket) {
+async function readQR(frame, exhaustive, ticket, deep = true) {
   qrDiagnostics={available:Boolean(window.LabelQR && typeof window.jsQR==='function'),decoded:0,unsupported:0};
   if (!qrDiagnostics.available) return [];
   let image = frame.getContext('2d', {willReadFrequently:true}).getImageData(0,0,frame.width,frame.height);
   if (typeof Worker === 'function') {
     try {
       if (!qrWorker) {
-        qrWorker = new Worker('qr-worker.js?v=3.21');
+        qrWorker = new Worker('qr-worker.js?v=3.22');
         qrWorker.onmessage = ({data}) => {
           const job=qrJobs.get(data.id);if(!job)return;
           qrJobs.delete(data.id);clearTimeout(job.timer);
@@ -615,9 +621,12 @@ async function readQR(frame, exhaustive, ticket) {
       }
       const result = await new Promise((resolve,reject)=>{
         const id=++qrJob;
-        const timer=setTimeout(()=>{qrJobs.delete(id);reject(new Error('QR scan timed out'));},30000);
+        const timer=setTimeout(()=>{
+          qrJobs.delete(id); qrWorker?.terminate(); qrWorker=null;
+          reject(new Error('QR scan timed out'));
+        },12000);
         qrJobs.set(id,{resolve,reject,timer});
-        qrWorker.postMessage({id,buffer:image.data.buffer,width:image.width,height:image.height,exhaustive,pass:qrPass++,excluded:[...items.map(item=>item.code),...confirmedReads]},[image.data.buffer]);
+        qrWorker.postMessage({id,buffer:image.data.buffer,width:image.width,height:image.height,exhaustive,deep,pass:qrPass++,excluded:[...items.map(item=>item.code),...confirmedReads]},[image.data.buffer]);
       });
       if(ticket!==session)return [];
       qrDiagnostics=result.diagnostics;return result.readings;
@@ -628,7 +637,7 @@ async function readQR(frame, exhaustive, ticket) {
     }
   }
   return LabelQR.scanFrame(image,jsQR,{
-    exhaustive, pass:qrPass++, cancelled:()=>ticket !== session,
+    exhaustive, deep, pass:qrPass++, cancelled:()=>ticket !== session,
     onDecode:({supported})=>{qrDiagnostics.decoded++;if(!supported) qrDiagnostics.unsupported++;},
     stopWhen:exhaustive ? undefined : reading=>!alreadyAdded(reading.code) && !confirmedReads.has(reading.code),
     progress:percent=>{
@@ -646,7 +655,8 @@ async function scanLive(capture = false) {
   syncControls();
   try {
     const centre=centreCameraFrame();
-    let display=centre.frame, image=null, rawReadings=await readQR(centre.frame,false,ticket);
+    const deepCentreScan = livePass % 3 === 1;
+    let display=centre.frame, image=null, rawReadings=await readQR(centre.frame,false,ticket,deepCentreScan);
     const centreDiagnostics={...qrDiagnostics};
     const hasDirectCentre=rawReadings.some(reading=>!reading.inferred && !alreadyAdded(reading.code) && !confirmedReads.has(reading.code));
     const needsHybrid=rawReadings.some(reading=>reading.inferred && reading.suffix && reading.bounds);
@@ -657,19 +667,18 @@ async function scanLive(capture = false) {
     if(inspectFullFrame) {
       const full=wholeFrame(); image=full.image; display=full.display;
       const centreReadings=rawReadings.map(reading=>({...reading,corners:reading.corners?.map(p=>({x:centre.bounds.left+p.x*centre.bounds.width,y:centre.bounds.top+p.y*centre.bounds.height})),bounds:{left:centre.bounds.left+reading.bounds.left*centre.bounds.width,top:centre.bounds.top+reading.bounds.top*centre.bounds.height,width:reading.bounds.width*centre.bounds.width,height:reading.bounds.height*centre.bounds.height}}));
-      const fullReadings=await readQR(display,Boolean(capture),ticket);
+      const fullReadings=await readQR(display,Boolean(capture),ticket,true);
       rawReadings=[...new Map([...centreReadings,...fullReadings].map(reading=>[reading.code,reading])).values()];
       qrDiagnostics.decoded+=centreDiagnostics.decoded;qrDiagnostics.unsupported+=centreDiagnostics.unsupported;
     }
     const combinedQR = shouldReadHybrid
       ? await readHybridSerials(display,rawReadings,ticket)
       : rawReadings.filter(reading => !reading.inferred);
-    const qrReadings = combinedQR.filter(reading=>!alreadyAdded(reading.code) && !confirmedReads.has(reading.code));
+    const qrReadings = combinedQR.filter(reading=>!temporarilySkipped(reading.code) && !alreadyAdded(reading.code) && !confirmedReads.has(reading.code));
     if (ticket !== session || cropTicket !== cropVersion || !stream || pending) return;
     if (qrReadings.length) {
       if(capture) freezeCamera(display,qrReadings);
-      else if(multiScan) { const added=collectMulti(qrReadings);multiCooldownUntil=Date.now()+(added?650:450);if(added){detectionFrame=display;showScanSuccess(qrReadings[0].code);setGuide('ready', 'Serial saved · point at the next label');liveStatus(`${multiReadings.length} serial${multiReadings.length === 1 ? '' : 's'} ready. Keep scanning or add all to draft.`);} }
-      else { analysisPaused=true;detectionFrame=display;detected=qrReadings;renderDetections();showScanSuccess(qrReadings[0].code);setGuide('ready', 'Good distance · hold still');liveStatus('Serial detected. Tap it to confirm, or scan the next label.'); }
+      else { const added=collectMulti(qrReadings);multiCooldownUntil=Date.now()+(added?650:450);if(added){detectionFrame=display;showScanSuccess(qrReadings[0].code);setGuide('ready', 'Serial saved · point at the next label');liveStatus(`${multiReadings.length} serial${multiReadings.length === 1 ? '' : 's'} ready. Keep scanning or add all to draft.`);} }
       return;
     }
     if(combinedQR.length) {liveStatus('QR read — this serial is already in your list. Point at a different label.');return;}
@@ -684,12 +693,12 @@ async function scanLive(capture = false) {
     const worker = await getWorker();
     const readings = await readPrintedSerials(worker, image);
     if (ticket !== session || cropTicket !== cropVersion || !stream || pending) return;
-    const available = readings.filter(reading => !alreadyAdded(reading.code) && !confirmedReads.has(reading.code));
+    const available = readings.filter(reading => !temporarilySkipped(reading.code) && !alreadyAdded(reading.code) && !confirmedReads.has(reading.code));
     const nextReads = new Map(available.map(reading => [reading.code, (previousReads.get(reading.code) || 0) + 1]));
     const stable = available.filter(reading => nextReads.get(reading.code) >= 2);
     previousReads = nextReads;
     if (capture) freezeCamera(display,available);
-    else if(stable.length) { if(multiScan) { const added=collectMulti(stable);multiCooldownUntil=Date.now()+(added?650:450);if(added){detectionFrame=display;showScanSuccess(stable[0].code);setGuide('ready', 'Serial saved · point at the next label');liveStatus(`${multiReadings.length} serial${multiReadings.length === 1 ? '' : 's'} ready. Keep scanning or add all to draft.`);} } else { analysisPaused=true;detectionFrame=display;detected=stable;renderDetections();showScanSuccess(stable[0].code);setGuide('ready', 'Good distance · hold still');liveStatus('Serial detected. Tap it to confirm, or scan the next label.'); } }
+    else if(stable.length) { const added=collectMulti(stable);multiCooldownUntil=Date.now()+(added?650:450);if(added){detectionFrame=display;showScanSuccess(stable[0].code);setGuide('ready', 'Serial saved · point at the next label');liveStatus(`${multiReadings.length} serial${multiReadings.length === 1 ? '' : 's'} ready. Keep scanning or add all to draft.`);} }
     else { setGuide(available.length ? 'steady' : 'align', available.length ? 'Text seen · hold steady' : 'Fit one label inside · move closer if it looks small'); liveStatus(available.length ? 'Text detected… hold steady.' : qrDiagnostics.unsupported ? 'QR read, but its serial format is unsupported. Try a close photo of the printed text.' : 'QR is not readable yet. Keep one whole QR in the guide; avoid glare and wait for focus.'); }
   } catch {
     if (ticket === session && stream) liveStatus('Text fallback failed to load or read. QR scanning will keep trying; you can also take a close photo.');
@@ -745,13 +754,14 @@ $('#manualForm').onsubmit = event => {
   const code = normalizeCode($('#manualSerial').value);
   if (!SERIAL_FORMAT.test(code)) { toast('Use 3 letters followed by 6–10 digits'); return; }
   if (stream) stopCamera('Manual serial review.', false);
-  showConfirmation(code, 'manual'); pending.method = 'manual'; pending.inferred = false;
+  showConfirmation(code); pending.method = 'manual'; pending.inferred = false;
   $('#readingNote').textContent = 'Manually entered. Check against the printed label before adding.';
   $('#manualSerial').value = '';
 };
-function clearDraft() { items = []; confirmedReads.clear(); lastConfirmedRead = ''; clearConfirmation(); $('#last').style.display = 'none'; save(); }
+function clearDraft() { items = []; confirmedReads.clear(); clearConfirmation(); $('#last').style.display = 'none'; save(); }
 window.LabelLensScanner = {
-  sync:syncControls, copy:copyText, pause:()=>stopCamera('Camera paused for submission.', false), clearDraft,
+  sync:syncControls, copy:copyText, pause:()=>stopCamera('Camera paused. Your scanned results are still here.', true, true), clearDraft,
+  items:()=>items.map(item=>({...item})),
   reset:()=> { stopCamera('Sign in and choose a product to scan.', false); source = null; rotation = 0; canvas.width = canvas.height = frozenCanvas.width = frozenCanvas.height = 0; $('#manualSerial').value = ''; renderPhoto(); clearDraft(); }
 };
 renderList(); syncControls();
