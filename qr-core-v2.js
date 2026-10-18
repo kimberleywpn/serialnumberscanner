@@ -132,6 +132,10 @@
         }
       }
     }
+    // Most live passes only need the cheap full-frame decode above. Finder
+    // detection and tiled decoding are intentionally less frequent to reduce
+    // heat and battery drain on phones.
+    if (!exhaustive && options.deep === false) return [];
     const focused = finderRegions(frame).map(region=>({...region,focused:true}));
     const windows = [{x:0,y:0,w:width,h:height},...focused];
     const add = (x,y,w,h) => {
