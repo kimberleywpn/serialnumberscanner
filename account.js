@@ -321,8 +321,15 @@
     if (!accessToken) { clearPrivate({preserveDraft:true}); status('loginStatus', 'Sign in with your shared account.'); el('signIn').disabled = false; return; }
     try { await enter(await api('/api/auth/me')); }
     catch (error) {
-      if (error.status !== 401) status('loginStatus', error.message, true);
-      else status('loginStatus', draft.length ? 'Session ended. Sign in again to continue with your saved draft.' : 'Sign in with your shared account.', Boolean(draft.length));
+      if (error.status !== 401) {
+        // A tunnel or server interruption must not strand the page on the
+        // loading panel or erase a still-valid saved login.
+        scanner()?.pause();
+        el('bootPanel').hidden = true;
+        el('appContent').hidden = true;
+        el('loginPanel').hidden = false;
+        status('loginStatus', `${error.message} Your saved login and draft are kept; refresh to retry.`, true);
+      } else status('loginStatus', draft.length ? 'Session ended. Sign in again to continue with your saved draft.' : 'Sign in with your shared account.', Boolean(draft.length));
     }
     finally { el('signIn').disabled = false; sync(); }
   })();
