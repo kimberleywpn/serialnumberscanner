@@ -32,6 +32,7 @@
       el('productDetails').textContent = ''; el('submissionSummary').textContent = ''; el('currentSpec').textContent = 'Current spec: Not selected';
     }
     el('exportExcel').hidden = true; el('exportExcel').disabled = false;
+    el('retrySession').hidden = true;
     el('bootPanel').hidden = true;
     el('appContent').hidden = true; el('loginPanel').hidden = false;
     el('signedInAs').textContent = ''; el('password').value = '';
@@ -172,6 +173,7 @@
     if (result.access_token) { accessToken = result.access_token; localStorage.setItem(TOKEN_KEY, accessToken); }
     user = result.user; csrf = result.csrf;
     el('password').value = ''; el('signedInAs').textContent = `${user.username} · ${user.role === 'admin' ? 'Admin' : user.role === 'viewer' ? 'Read-only' : 'User'}`;
+    el('retrySession').hidden = true;
     el('historyScopeLabel').hidden = user.role !== 'admin';
     el('exportExcel').hidden = user.role !== 'admin';
     // Product choices and saved history are independent. Show the workspace at
@@ -188,6 +190,18 @@
     try { await enter(await api('/api/auth/login', {username:el('username').value.trim(), password:el('password').value}, 15000)); }
     catch (error) { clearPrivate({preserveDraft:true}); status('loginStatus', error.message, true); }
     finally { el('signIn').disabled = false; }
+  };
+  el('retrySession').onclick = async () => {
+    if (!accessToken) return;
+    el('retrySession').disabled = true;
+    status('loginStatus', 'Reconnecting…');
+    try { await enter(await api('/api/auth/me')); }
+    catch (error) {
+      if (error.status !== 401) {
+        status('loginStatus', `${error.message} Your saved login and draft are still kept.`, true);
+        el('retrySession').hidden = false;
+      }
+    } finally { el('retrySession').disabled = false; }
   };
   el('signOut').onclick = async () => {
     if (submitting || (draft.length && !confirm('Sign out and discard your unsubmitted draft?'))) return;
@@ -330,7 +344,8 @@
         el('bootPanel').hidden = true;
         el('appContent').hidden = true;
         el('loginPanel').hidden = false;
-        status('loginStatus', `${error.message} Your saved login and draft are kept; refresh to retry.`, true);
+        status('loginStatus', `${error.message} Your saved login and draft are kept.`, true);
+        el('retrySession').hidden = false;
       } else status('loginStatus', draft.length ? 'Session ended. Sign in again to continue with your saved draft.' : 'Sign in with your shared account.', Boolean(draft.length));
     }
     finally { el('signIn').disabled = false; sync(); }
