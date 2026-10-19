@@ -3,15 +3,19 @@
   const el = id => document.getElementById(id);
   const API_BASE = 'https://m9kw6gfq-8088.asse.devtunnels.ms';
   const TOKEN_KEY = 'label_lens_access_token';
+  const CATALOGUE_KEY = 'label_lens_catalogue_v1';
   let accessToken = localStorage.getItem(TOKEN_KEY) || '';
   let user = null, csrf = '', products = [], draft = [], submitting = false, exporting = false;
   let retry = null, nextBefore = null, historyEpoch = 0, historyBusy = false, authEpoch = 0;
+  let catalogueEpoch = 0, catalogueBusy = false, catalogueTask = null;
+  let authBusy = false;
   const escape = value => String(value).replace(/[&<>"']/g, char => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
   function status(id, text, error = false) { el(id).textContent = text; el(id).dataset.error = String(error); }
   function scanner() { return window.LabelLensScanner; }
   function clearPrivate({preserveDraft = false} = {}) {
     const savedDraft = preserveDraft ? scanner()?.items?.() || draft : [];
-    authEpoch++; historyEpoch++; user = null; csrf = '';
+    authEpoch++; historyEpoch++; catalogueEpoch++; user = null; csrf = '';
+    catalogueBusy = false; catalogueTask = null;
     if (!preserveDraft) { products = []; retry = null; }
     draft = savedDraft;
     accessToken = ''; localStorage.removeItem(TOKEN_KEY);
@@ -33,39 +37,53 @@
     }
     el('exportExcel').hidden = true; el('exportExcel').disabled = false;
     el('retrySession').hidden = true;
+    el('retryProducts').hidden = true; el('retryProducts').disabled = false;
+    status('catalogueStatus', ''); el('catalogueStatus').hidden = true;
     el('bootPanel').hidden = true;
     el('appContent').hidden = true; el('loginPanel').hidden = false;
     el('signedInAs').textContent = ''; el('password').value = '';
     if (!preserveDraft) status('submissionStatus', 'Drafts are held in memory. Submit before leaving or signing out.');
     sync();
   }
-  async function api(path, body, timeoutMs = 8000) {
-    const headers = accessToken ? {'Authorization':`Bearer ${accessToken}`} : {};
+  async function api(path, body, timeoutMs = 20000) {
+    const requestToken = accessToken;
+    const headers = requestToken ? {'Authorization':`Bearer ${requestToken}`} : {};
     if (body !== undefined) Object.assign(headers, {'Content-Type':'application/json', 'X-Label-Lens-CSRF':csrf, 'X-Label-Lens-Origin':location.origin});
-    let response;
+    let response, result;
+    const deadline = Date.now() + timeoutMs;
     const attempts = body === undefined ? 2 : 1;
     for (let attempt = 0; attempt < attempts; attempt++) {
+      // A read gets one recovery attempt within the same overall deadline.
+      // Writes are never repeated automatically because they may have saved.
+      const remaining = Math.max(1, deadline - Date.now());
+      const signal = AbortSignal.timeout(body === undefined && attempt === 0 ? Math.min(10000, remaining) : remaining);
       try {
         response = await fetch(API_BASE + path, {
         method: body === undefined ? 'GET' : 'POST', credentials:'omit', cache:'no-store', headers,
-        signal:AbortSignal.timeout(timeoutMs), ...(body === undefined ? {} : {body:JSON.stringify(body)})
+        signal, ...(body === undefined ? {} : {body:JSON.stringify(body)})
         });
-        if (body === undefined && [502, 503, 504].includes(response.status) && attempt + 1 < attempts) {
+        if (body === undefined && [502, 503, 504].includes(response.status) && attempt + 1 < attempts && deadline - Date.now() > 750) {
+          await response.body?.cancel().catch(() => {});
           await new Promise(resolve => setTimeout(resolve, 750));
           continue;
         }
+        result = await response.json().catch(error => {
+          if (signal.aborted) throw signal.reason;
+          if (error?.name === 'TimeoutError' || error?.name === 'AbortError') throw error;
+          return null;
+        });
         break;
       } catch (error) {
-        if (attempt + 1 < attempts && error?.name !== 'TimeoutError') {
+        if (attempt + 1 < attempts && deadline - Date.now() > 750) {
           await new Promise(resolve => setTimeout(resolve, 750));
           continue;
         }
-        throw new Error(error?.name === 'TimeoutError' ? 'Connection timed out. Please try again. Your saved login and draft are kept.' : 'Connection interrupted. Please try again. Your saved login and draft are kept.');
+        const timedOut = error?.name === 'TimeoutError' || (error?.name === 'AbortError' && signal.aborted);
+        throw new Error(timedOut ? 'Connection timed out. Please try again. Your saved login and draft are kept.' : 'Connection interrupted. Please try again. Your saved login and draft are kept.');
       }
     }
-    const result = await response.json().catch(() => null);
     if (!response.ok) {
-      if (response.status === 401 && path !== '/api/auth/login') { clearPrivate({preserveDraft:true}); status('loginStatus', 'Session ended. Sign in again to continue with your saved draft.', true); }
+      if (response.status === 401 && path !== '/api/auth/login' && requestToken === accessToken) { clearPrivate({preserveDraft:true}); status('loginStatus', 'Session ended. Sign in again to continue with your saved draft.', true); }
       throw Object.assign(new Error(typeof result?.detail === 'string' ? result.detail : 'Server unavailable. Your draft has not been submitted.'), {status:response.status});
     }
     if (!result) throw new Error('The scanner backend is not available at this address.');
@@ -113,6 +131,9 @@
       litres:el('productLitres').value,
     };
     products = data.products;
+    resetSelect('productModel', 'Choose model');
+    resetSelect('productRating', 'Choose rating');
+    resetSelect('productType', 'Choose type');
     el('productBrand').replaceChildren(new Option('Choose brand', ''));
     el('productLitres').replaceChildren(new Option('Choose litres', ''));
     for (const brand of [...new Set(products.map(entry => entry.brand))].sort()) el('productBrand').add(new Option(brand, brand));
@@ -126,6 +147,56 @@
     if ([...el('productLitres').options].some(option => option.value === selected.litres)) el('productLitres').value = selected.litres;
     sync();
   }
+  function validCatalogue(data) {
+    const litres = ['1L','3.5L','4L','5L','18L'];
+    return Boolean(data && Array.isArray(data.products) && data.products.length > 0 && data.products.length <= 1000
+      && data.products.every(product => product && ['id','brand','model','viscosity','oil_type','ratings'].every(key => typeof product[key] === 'string' && product[key].length <= 1000) && product.id && product.brand && product.model)
+      && new Set(data.products.map(product => product.id)).size === data.products.length
+      && Array.isArray(data.litres) && data.litres.length === litres.length && new Set(data.litres).size === litres.length && data.litres.every(value => litres.includes(value)));
+  }
+  function savedCatalogue() {
+    try {
+      const saved = JSON.parse(localStorage.getItem(CATALOGUE_KEY) || 'null');
+      return saved?.apiBase === API_BASE && validCatalogue(saved.data) ? saved.data : null;
+    } catch { return null; }
+  }
+  function loadProducts() {
+    if (!user) return Promise.resolve();
+    if (catalogueBusy) return catalogueTask;
+    const epoch = authEpoch, request = ++catalogueEpoch;
+    catalogueBusy = true;
+    el('retryProducts').disabled = true;
+    status('catalogueStatus', products.length ? 'Checking product updates…' : 'Loading products…');
+    el('catalogueStatus').hidden = false;
+    catalogueTask = (async () => {
+      try {
+        const data = await api('/api/products');
+        if (epoch !== authEpoch || request !== catalogueEpoch) return;
+        if (!validCatalogue(data)) throw new Error('Invalid product details');
+        fillProducts(data);
+        try { localStorage.setItem(CATALOGUE_KEY, JSON.stringify({apiBase:API_BASE, savedAt:Date.now(), data})); } catch { /* Storage may be full or unavailable. */ }
+        status('catalogueStatus', ''); el('catalogueStatus').hidden = true;
+        el('retryProducts').hidden = true;
+      } catch (error) {
+        if (epoch !== authEpoch || request !== catalogueEpoch) return;
+        status('catalogueStatus', products.length ? 'Using saved product details. Retry to check for updates.' : 'Product details could not load. You can keep scanning and retry here. Your draft is kept.', !products.length);
+        el('catalogueStatus').hidden = false;
+        el('retryProducts').hidden = false;
+      } finally {
+        if (epoch === authEpoch && request === catalogueEpoch) {
+          catalogueBusy = false; catalogueTask = null;
+          el('retryProducts').disabled = false;
+        }
+      }
+    })();
+    return catalogueTask;
+  }
+  el('retryProducts').onclick = () => loadProducts();
+  window.addEventListener('online', () => {
+    if (!user) return;
+    if (!el('retryProducts').hidden) loadProducts();
+    if (el('historyStatus').dataset.error === 'true') loadHistory();
+  });
   el('productBrand').onchange = () => {
     resetSelect('productModel', 'Choose model');
     resetSelect('productRating', 'Choose rating');
@@ -169,7 +240,7 @@
   }
   el('newSubmission').onclick = startNewSubmission;
   async function enter(result) {
-    const epoch = ++authEpoch;
+    authEpoch++;
     if (result.access_token) { accessToken = result.access_token; localStorage.setItem(TOKEN_KEY, accessToken); }
     user = result.user; csrf = result.csrf;
     el('password').value = ''; el('signedInAs').textContent = `${user.username} · ${user.role === 'admin' ? 'Admin' : user.role === 'viewer' ? 'Read-only' : 'User'}`;
@@ -179,29 +250,35 @@
     // Product choices and saved history are independent. Show the workspace at
     // once and load both in parallel instead of making staff wait for each one.
     el('bootPanel').hidden = true; el('loginPanel').hidden = true; el('appContent').hidden = false;
-    const [catalogueResult] = await Promise.all([api('/api/products').then(value => ({value}), error => ({error})), loadHistory()]);
-    if (epoch !== authEpoch) return;
-    if (catalogueResult.error) {
-      status('setupStatus', `Signed in, but product details could not load. ${catalogueResult.error.message} Refresh to try again.`, true);
-    } else fillProducts(catalogueResult.value);
+    // Cached product metadata is used only after the server verifies the login.
+    // Never store private history, drafts, or permissions in this cache.
+    const cached = savedCatalogue();
+    if (cached) fillProducts(cached);
+    else sync();
+    catalogueEpoch++; catalogueBusy = false; catalogueTask = null;
+    loadProducts();
+    loadHistory();
   }
   el('loginForm').onsubmit = async event => {
-    event.preventDefault(); el('signIn').disabled = true; status('loginStatus', 'Signing in…');
+    event.preventDefault();
+    if (authBusy) return;
+    authBusy = true; el('signIn').disabled = true; el('retrySession').disabled = true;
+    status('loginStatus', 'Signing in…');
     try { await enter(await api('/api/auth/login', {username:el('username').value.trim(), password:el('password').value}, 15000)); }
     catch (error) { clearPrivate({preserveDraft:true}); status('loginStatus', error.message, true); }
-    finally { el('signIn').disabled = false; }
+    finally { authBusy = false; el('signIn').disabled = false; el('retrySession').disabled = false; }
   };
   el('retrySession').onclick = async () => {
-    if (!accessToken) return;
-    el('retrySession').disabled = true;
+    if (!accessToken || authBusy) return;
+    authBusy = true; el('signIn').disabled = true; el('retrySession').disabled = true;
     status('loginStatus', 'Reconnecting…');
     try { await enter(await api('/api/auth/me')); }
     catch (error) {
       if (error.status !== 401) {
-        status('loginStatus', `${error.message} Your saved login and draft are still kept.`, true);
+        status('loginStatus', error.message, true);
         el('retrySession').hidden = false;
       }
-    } finally { el('retrySession').disabled = false; }
+    } finally { authBusy = false; el('signIn').disabled = false; el('retrySession').disabled = false; }
   };
   el('signOut').onclick = async () => {
     if (submitting || (draft.length && !confirm('Sign out and discard your unsubmitted draft?'))) return;
@@ -260,6 +337,10 @@
     }
   }
   function editSubmission(entry, card, button) {
+    if (!products.length) {
+      status('historyStatus', 'Load product details before editing. Use Retry products above if needed.', true);
+      return;
+    }
     button.disabled = true;
     const form = document.createElement('form'); form.className = 'history-editor';
     const options = products.map(p => `<option value="${escape(p.id)}">${escape(p.brand)} | ${escape(p.model)} | ${escape(gradeLabel(p.viscosity))} | ${escape(typeLabel(p.oil_type))}</option>`).join('');
@@ -333,8 +414,8 @@
   window.addEventListener('beforeunload', event => { if (draft.length || submitting) { event.preventDefault(); event.returnValue = ''; } });
   window.LabelLensAccount = {ready, canScan, saving:() => submitting, draftChanged};
   (async () => {
-    el('signIn').disabled = true;
-    if (!accessToken) { clearPrivate({preserveDraft:true}); status('loginStatus', 'Sign in with your shared account.'); el('signIn').disabled = false; return; }
+    authBusy = true; el('signIn').disabled = true; el('retrySession').disabled = true;
+    if (!accessToken) { clearPrivate({preserveDraft:true}); status('loginStatus', 'Sign in with your shared account.'); authBusy = false; el('signIn').disabled = false; el('retrySession').disabled = false; return; }
     try { await enter(await api('/api/auth/me')); }
     catch (error) {
       if (error.status !== 401) {
@@ -344,11 +425,11 @@
         el('bootPanel').hidden = true;
         el('appContent').hidden = true;
         el('loginPanel').hidden = false;
-        status('loginStatus', `${error.message} Your saved login and draft are kept.`, true);
+        status('loginStatus', error.message, true);
         el('retrySession').hidden = false;
       } else status('loginStatus', draft.length ? 'Session ended. Sign in again to continue with your saved draft.' : 'Sign in with your shared account.', Boolean(draft.length));
     }
-    finally { el('signIn').disabled = false; sync(); }
+    finally { authBusy = false; el('signIn').disabled = false; el('retrySession').disabled = false; sync(); }
   })();
 })();
 
