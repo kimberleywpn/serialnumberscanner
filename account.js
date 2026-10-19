@@ -219,7 +219,9 @@
     const card = document.createElement('article'); card.className = 'saved-card';
     const p = entry.product;
     const codes = entry.serials.map(serial => serial.code).join('\n');
-    card.innerHTML = `<h3>${escape(p.brand)} | ${escape(p.model)} | ${escape(p.viscosity)} | ${escape(entry.litres)}</h3><p>Serial numbers</p><div class="saved-codes">${escape(codes)}</div>`;
+    const uploader = user?.role === 'admin' && el('historyScope').value === 'all' && entry.username
+      ? `<p class="saved-uploader">Uploaded by: ${escape(entry.username)}</p>` : '';
+    card.innerHTML = `<h3>${escape(p.brand)} | ${escape(p.model)} | ${escape(p.viscosity)} | ${escape(entry.litres)}</h3>${uploader}<p>Serial numbers</p><div class="saved-codes">${escape(codes)}</div>`;
     if (user?.role !== 'viewer') {
       const edit = document.createElement('button'); edit.type = 'button'; edit.className = 'mini'; edit.textContent = 'Edit submission';
       edit.onclick = () => editSubmission(entry, card, edit);
