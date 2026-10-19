@@ -9,10 +9,15 @@
   let retry = null, nextBefore = null, historyEpoch = 0, historyBusy = false, authEpoch = 0;
   let catalogueEpoch = 0, catalogueBusy = false, catalogueTask = null;
   let authBusy = false;
+  let restoreFailed = false, restoreTimer = null;
   const escape = value => String(value).replace(/[&<>"']/g, char => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
   function status(id, text, error = false) { el(id).textContent = text; el(id).dataset.error = String(error); }
   function scanner() { return window.LabelLensScanner; }
+  function cancelRestoreRetry() {
+    clearTimeout(restoreTimer); restoreTimer = null;
+  }
   function clearPrivate({preserveDraft = false} = {}) {
+    cancelRestoreRetry(); restoreFailed = false;
     const savedDraft = preserveDraft ? scanner()?.items?.() || draft : [];
     authEpoch++; historyEpoch++; catalogueEpoch++; user = null; csrf = '';
     catalogueBusy = false; catalogueTask = null;
@@ -37,6 +42,7 @@
     }
     el('exportExcel').hidden = true; el('exportExcel').disabled = false;
     el('retrySession').hidden = true;
+    el('showLogin').hidden = true;
     el('retryProducts').hidden = true; el('retryProducts').disabled = false;
     status('catalogueStatus', ''); el('catalogueStatus').hidden = true;
     el('bootPanel').hidden = true;
@@ -193,9 +199,15 @@
   }
   el('retryProducts').onclick = () => loadProducts();
   window.addEventListener('online', () => {
-    if (!user) return;
+    if (!user) {
+      if (accessToken && restoreFailed) restoreSession({autoRetry:false});
+      return;
+    }
     if (!el('retryProducts').hidden) loadProducts();
     if (el('historyStatus').dataset.error === 'true') loadHistory();
+  });
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden && !user && accessToken && restoreFailed) restoreSession({autoRetry:false});
   });
   el('productBrand').onchange = () => {
     resetSelect('productModel', 'Choose model');
@@ -240,11 +252,13 @@
   }
   el('newSubmission').onclick = startNewSubmission;
   async function enter(result) {
+    cancelRestoreRetry(); restoreFailed = false;
     authEpoch++;
     if (result.access_token) { accessToken = result.access_token; localStorage.setItem(TOKEN_KEY, accessToken); }
     user = result.user; csrf = result.csrf;
     el('password').value = ''; el('signedInAs').textContent = `${user.username} · ${user.role === 'admin' ? 'Admin' : user.role === 'viewer' ? 'Read-only' : 'User'}`;
     el('retrySession').hidden = true;
+    el('showLogin').hidden = true;
     el('historyScopeLabel').hidden = user.role !== 'admin';
     el('exportExcel').hidden = user.role !== 'admin';
     // Product choices and saved history are independent. Show the workspace at
@@ -262,23 +276,57 @@
   el('loginForm').onsubmit = async event => {
     event.preventDefault();
     if (authBusy) return;
+    cancelRestoreRetry(); restoreFailed = false;
     authBusy = true; el('signIn').disabled = true; el('retrySession').disabled = true;
     status('loginStatus', 'Signing in…');
     try { await enter(await api('/api/auth/login', {username:el('username').value.trim(), password:el('password').value}, 15000)); }
     catch (error) { clearPrivate({preserveDraft:true}); status('loginStatus', error.message, true); }
     finally { authBusy = false; el('signIn').disabled = false; el('retrySession').disabled = false; }
   };
-  el('retrySession').onclick = async () => {
-    if (!accessToken || authBusy) return;
-    authBusy = true; el('signIn').disabled = true; el('retrySession').disabled = true;
-    status('loginStatus', 'Reconnecting…');
-    try { await enter(await api('/api/auth/me')); }
-    catch (error) {
-      if (error.status !== 401) {
-        status('loginStatus', error.message, true);
-        el('retrySession').hidden = false;
+  async function restoreSession({autoRetry = true} = {}) {
+    if (authBusy) return;
+    if (!accessToken) {
+      clearPrivate({preserveDraft:true});
+      status('loginStatus', 'Sign in with your shared account.');
+      el('signIn').disabled = false;
+      return;
+    }
+    cancelRestoreRetry(); restoreFailed = false;
+    const epoch = authEpoch, token = accessToken;
+    authBusy = true;
+    el('signIn').disabled = true; el('retrySession').disabled = true; el('showLogin').disabled = true;
+    el('bootPanel').hidden = false; el('loginPanel').hidden = true; el('appContent').hidden = true;
+    el('retrySession').hidden = true; el('showLogin').hidden = true;
+    status('restoreStatus', 'Restoring your session…');
+    try {
+      const result = await api('/api/auth/me');
+      if (epoch === authEpoch && token === accessToken) await enter(result);
+    } catch (error) {
+      if (error.status === 401) {
+        if (!user) status('loginStatus', draft.length ? 'Session ended. Sign in again to continue with your saved draft.' : 'Sign in with your shared account.', Boolean(draft.length));
+      } else if (epoch === authEpoch && token === accessToken) {
+        restoreFailed = true;
+        scanner()?.pause();
+        status('restoreStatus', autoRetry ? 'Could not reconnect yet. Your sign-in is saved. Retrying shortly…' : 'Could not reconnect yet. Your sign-in is saved. Retry the connection.', true);
+        el('retrySession').hidden = false; el('showLogin').hidden = false;
+        if (autoRetry) restoreTimer = setTimeout(() => {
+          restoreTimer = null;
+          if (restoreFailed && accessToken && !user && !document.hidden) restoreSession({autoRetry:false});
+        }, 5000);
       }
-    } finally { authBusy = false; el('signIn').disabled = false; el('retrySession').disabled = false; }
+    } finally {
+      authBusy = false;
+      el('signIn').disabled = false; el('retrySession').disabled = false; el('showLogin').disabled = false;
+      sync();
+    }
+  }
+  el('retrySession').onclick = () => restoreSession();
+  el('showLogin').onclick = () => {
+    if (authBusy) return;
+    cancelRestoreRetry(); restoreFailed = false;
+    el('bootPanel').hidden = true; el('loginPanel').hidden = false;
+    el('retrySession').hidden = true; el('showLogin').hidden = true;
+    status('loginStatus', 'Sign in with your shared account.');
   };
   el('signOut').onclick = async () => {
     if (submitting || (draft.length && !confirm('Sign out and discard your unsubmitted draft?'))) return;
@@ -413,23 +461,6 @@
   el('historyFilter').onsubmit = event => { event.preventDefault(); loadHistory(); };
   window.addEventListener('beforeunload', event => { if (draft.length || submitting) { event.preventDefault(); event.returnValue = ''; } });
   window.LabelLensAccount = {ready, canScan, saving:() => submitting, draftChanged};
-  (async () => {
-    authBusy = true; el('signIn').disabled = true; el('retrySession').disabled = true;
-    if (!accessToken) { clearPrivate({preserveDraft:true}); status('loginStatus', 'Sign in with your shared account.'); authBusy = false; el('signIn').disabled = false; el('retrySession').disabled = false; return; }
-    try { await enter(await api('/api/auth/me')); }
-    catch (error) {
-      if (error.status !== 401) {
-        // A tunnel or server interruption must not strand the page on the
-        // loading panel or erase a still-valid saved login.
-        scanner()?.pause();
-        el('bootPanel').hidden = true;
-        el('appContent').hidden = true;
-        el('loginPanel').hidden = false;
-        status('loginStatus', error.message, true);
-        el('retrySession').hidden = false;
-      } else status('loginStatus', draft.length ? 'Session ended. Sign in again to continue with your saved draft.' : 'Sign in with your shared account.', Boolean(draft.length));
-    }
-    finally { authBusy = false; el('signIn').disabled = false; el('retrySession').disabled = false; sync(); }
-  })();
+  restoreSession();
 })();
 
